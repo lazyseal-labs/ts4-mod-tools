@@ -1,0 +1,8 @@
+{
+  "format": 1,
+  "name": "StressedMoodTestInteraction",
+  "packageManifest": "package.json",
+  "scriptArchives": [],
+  "tuningSchema": null,
+  "dependencies": null
+}

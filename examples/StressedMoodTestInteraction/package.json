@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "resources": [
+    {
+      "instance": "0xBBD666EEF138F1C9",
+      "source": "resources/test-tense-interaction.xml",
+      "encoding": "utf8",
+      "group": "0x00000000",
+      "type": "0xE882D22F"
+    },
+    {
+      "instance": "0xB92DCE3E1FF7F224",
+      "source": "resources/bed-injector-snippet.xml",
+      "encoding": "utf8",
+      "group": "0x00000000",
+      "type": "0x7DF2169C"
+    },
+    {
+      "instance": "0x0F00000000000001",
+      "source": "resources/test-tense-strings.stbl",
+      "encoding": "bytes",
+      "group": "0x00000000",
+      "type": "0x220557DA"
+    }
+  ]
+}

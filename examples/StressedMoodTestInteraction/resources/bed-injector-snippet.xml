@@ -1,0 +1,8 @@
+<I c="XmlInjector" i="snippet" m="xml_injector.snippet" n="S4MT:TestTense_OnBed_Injector" s="13343548037188284964">
+  <L n="add_interactions_to_objects">
+    <U>
+      <V n="object_selection" t="objects_with_affordance"><U n="objects_with_affordance"><T n="affordance">13094<!--bed_sleep--></T></U></V>
+      <L n="_super_affordances"><T>13535118906543894985<!--S4MT:TestTense_OnBed--></T></L>
+    </U>
+  </L>
+</I>

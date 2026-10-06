@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "tgi": "0x220557DA:0x00000000:0x0F00000000000001",
+  "entries": [
+    {
+      "key": "0xD5B00001",
+      "text": "Ułóż się i zestresuj"
+    },
+    {
+      "key": "0xD5B00002",
+      "text": "Test nastroju"
+    },
+    {
+      "key": "0xD5B00003",
+      "text": "Interakcja uruchomiona. Sprawdź nastrój Sima."
+    }
+  ]
+}

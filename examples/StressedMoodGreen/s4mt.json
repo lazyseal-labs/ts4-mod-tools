@@ -1,0 +1,11 @@
+{
+  "scriptArchives": [],
+  "name": "StressedMoodGreen",
+  "packageManifest": "package.json",
+  "format": 2,
+  "tuningSchema": {
+    "snapshot": ".s4mt/schema",
+    "sha256": "168d8f1e5a73ff5fbd0d362463802fe6781a6e91f70c768b0937d6360b448326",
+    "gameVersion": "1.128.90.1030"
+  }
+}

@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+**/TestResults/
+dist/
+.s4mt/
+.audit/
+.vs/
+.idea/
+coverage/
+*.user
+*.suo

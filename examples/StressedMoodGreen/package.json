@@ -1,0 +1,12 @@
+{
+  "resources": [
+    {
+      "instance": "0xB17201C249771AF4",
+      "type": "0x03B33DDF",
+      "group": "0x00000000",
+      "source": "resources/Mood_Stressed.xml",
+      "encoding": "utf8"
+    }
+  ],
+  "format": 1
+}

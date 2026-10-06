@@ -1,0 +1,21 @@
+<I c="ImmediateSuperInteraction" i="interaction" m="interactions.base.immediate_interaction" n="S4MT:TestTense_OnBed" s="13535118906543894985">
+  <V n="_saveable" t="disabled" />
+  <L n="basic_extras">
+    <V t="notification">
+      <U n="notification">
+        <V n="dialog" t="single"><V n="single" t="literal"><U n="literal"><V n="title" t="enabled"><T n="enabled">0xD5B00002</T></V><V n="text" t="single"><T n="single">0xD5B00003</T></V><E n="urgency">URGENT</E></U></V></V>
+        <V n="timing" t="at_beginning" />
+      </U>
+    </V>
+    <V t="buff"><U n="buff"><U n="buff_type"><T n="buff_type">12437<!--Buff_Environment_TenseAmbienceLarge, Mood_Stressed weight 3--></T></U><L n="subject"><E>Actor</E></L></U></V>
+    <V t="buff"><U n="buff"><U n="buff_type"><T n="buff_type">12438<!--Buff_Environment_TenseAmbienceMedium, Mood_Stressed weight 2--></T></U><L n="subject"><E>Actor</E></L></U></V>
+  </L>
+  <T n="display_name">0xD5B00001<!--Ułóż się i zestresuj--></T>
+  <T n="pie_menu_priority">10</T>
+  <T n="allow_user_directed">True</T>
+  <U n="progress_bar_enabled"><T n="bar_enabled">False</T></U>
+  <E n="target_type">OBJECT</E>
+  <L n="test_globals">
+    <V t="sim_info"><U n="sim_info"><V n="ages" t="specified"><L n="specified"><E>TEEN</E><E>YOUNGADULT</E><E>ADULT</E><E>ELDER</E></L></V><V n="species" t="unspecified"/><E n="who">Actor</E></U></V>
+  </L>
+</I>

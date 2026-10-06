@@ -1,0 +1,9 @@
+* text=auto eol=lf
+
+*.bin binary -eol
+*.dds binary -eol
+*.gz binary -eol
+*.package binary -eol
+*.png binary -eol
+*.ts4script binary -eol
+*.zip binary -eol

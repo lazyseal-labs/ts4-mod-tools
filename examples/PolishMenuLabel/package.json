@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "resources": [
+    {
+      "group": "0x00000000",
+      "instance": "0x0F54935F2685AD48",
+      "encoding": "bytes",
+      "source": "resources/polish-menu.stbl",
+      "type": "0x220557DA"
+    }
+  ]
+}
