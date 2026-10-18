@@ -15,7 +15,7 @@ public sealed class StdioTests
         ShutdownTimeout = TimeSpan.FromSeconds(5)
     }));
 
-    [Fact]
+    [WindowsFact]
     public async Task OfficialClientDiscoversExactlyThreeTypedToolsAndRejectsMalformedArguments()
     {
         using var workspace = new TestWorkspace();
@@ -32,7 +32,7 @@ public sealed class StdioTests
         Assert.True(valid.StructuredContent!.Value.GetProperty("futureReport").GetProperty("retained").GetArrayLength() == 2);
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task MissingCliReturnsStableErrorThroughProtocol()
     {
         using var workspace = new TestWorkspace();
@@ -44,7 +44,22 @@ public sealed class StdioTests
         Assert.Equal(3, (await client.ListToolsAsync()).Count);
     }
 
-    [Fact]
+    [NonWindowsFact]
+    public async Task UnsupportedPlatformReturnsStableErrorThroughProtocol()
+    {
+        using var workspace = new TestWorkspace();
+        await using var client = await Connect(workspace);
+        Assert.Equal(3, (await client.ListToolsAsync()).Count);
+        var result = await client.CallToolAsync("s4mt_project_validate", new Dictionary<string, object?>
+        {
+            ["project"] = workspace.Project()
+        });
+        Assert.True(result.IsError);
+        Assert.Equal("cli_unavailable", result.StructuredContent!.Value.GetProperty("error").GetProperty("code").GetString());
+        Assert.False(File.Exists(Path.Combine(workspace.Root, "child.pid")));
+    }
+
+    [WindowsFact]
     public async Task ExitOneReportAndNestedUnknownFieldsCrossRealStdio()
     {
         using var workspace = new TestWorkspace("invalid");
@@ -55,7 +70,7 @@ public sealed class StdioTests
         Assert.True(result.StructuredContent!.Value.GetProperty("diagnostics")[0].GetProperty("futureDiagnostic").GetProperty("retained").GetBoolean());
     }
 
-    [Theory]
+    [WindowsTheory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task MixedCaseAndBomProjectCannotWriteIntoGameRoot(bool bom)
@@ -73,7 +88,7 @@ public sealed class StdioTests
         Assert.False(File.Exists(Path.Combine(workspace.Root, "child.pid")));
     }
 
-    [Theory]
+    [WindowsTheory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task MixedCaseAndBomSourcesCannotBeDeletedAsStaging(bool bom)
@@ -99,7 +114,7 @@ public sealed class StdioTests
         Assert.False(File.Exists(Path.Combine(workspace.Root, "child.pid")));
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task CancellationCleansBuildStageAndNextBuildRecovers()
     {
         using var workspace = new TestWorkspace("wait", timeout: 15_000);

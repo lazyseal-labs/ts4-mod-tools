@@ -7,8 +7,16 @@ namespace S4MT.Mcp;
 
 internal sealed class ChildProcessJob : IDisposable
 {
+    private const uint JobObjectLimitKillOnJobClose = 0x2000;
+    private const int JobObjectExtendedLimitInformation = 9;
+    private const int JobObjectBasicAccountingInformation = 1;
+    private const uint ChildTerminationExitCode = 130;
+    private const int PollDelayMilliseconds = 10;
+    private const int CleanupTimeoutMilliseconds = 5000;
+
     private static ChildProcessJob? hostLifetime;
     private readonly SafeFileHandle? handle;
+    internal SafeFileHandle? Handle => handle;
 
     internal static void ContainHostLifetime()
     {
@@ -20,10 +28,21 @@ internal sealed class ChildProcessJob : IDisposable
     internal ChildProcessJob()
     {
         if (!OperatingSystem.IsWindows()) return;
-        handle = CreateJobObjectW(IntPtr.Zero, null);
-        var limits = new ExtendedLimits { Basic = new BasicLimits { Flags = 0x2000 } };
-        if (handle.IsInvalid || !SetInformationJobObject(handle, 9, ref limits, (uint)Marshal.SizeOf<ExtendedLimits>()))
-            throw new McpFailure("cli_unavailable", $"Could not create child process job: {new Win32Exception(Marshal.GetLastWin32Error()).Message}");
+        var created = CreateJobObjectW(IntPtr.Zero, null);
+        if (created.IsInvalid)
+        {
+            var error = Marshal.GetLastWin32Error();
+            created.Dispose();
+            throw new McpFailure("cli_unavailable", $"Could not create child process job: {new Win32Exception(error).Message}");
+        }
+        var limits = new ExtendedLimits { Basic = new BasicLimits { Flags = JobObjectLimitKillOnJobClose } };
+        if (!SetInformationJobObject(created, JobObjectExtendedLimitInformation, ref limits, (uint)Marshal.SizeOf<ExtendedLimits>()))
+        {
+            var error = Marshal.GetLastWin32Error();
+            created.Dispose();
+            throw new McpFailure("cli_unavailable", $"Could not configure child process job: {new Win32Exception(error).Message}");
+        }
+        handle = created;
     }
 
     internal void Attach(Process child)
@@ -39,15 +58,15 @@ internal sealed class ChildProcessJob : IDisposable
             if (!child.HasExited) child.Kill(entireProcessTree: true);
             return;
         }
-        if (!TerminateJobObject(handle, 130))
+        if (!TerminateJobObject(handle, ChildTerminationExitCode))
             throw new McpFailure("cleanup_failed", "Could not terminate the CLI process job.");
-        using var deadline = new CancellationTokenSource(5000);
+        using var deadline = new CancellationTokenSource(CleanupTimeoutMilliseconds);
         while (true)
         {
-            if (!QueryInformationJobObject(handle, 1, out var accounting, (uint)Marshal.SizeOf<Accounting>(), IntPtr.Zero))
+            if (!QueryInformationJobObject(handle, JobObjectBasicAccountingInformation, out var accounting, (uint)Marshal.SizeOf<Accounting>(), IntPtr.Zero))
                 throw new McpFailure("cleanup_failed", "Could not inspect the CLI process job.");
             if (accounting.ActiveProcesses == 0) return;
-            try { await Task.Delay(10, deadline.Token); }
+            try { await Task.Delay(PollDelayMilliseconds, deadline.Token); }
             catch (OperationCanceledException) { throw new McpFailure("cleanup_failed", "CLI process job did not stop within five seconds."); }
         }
     }

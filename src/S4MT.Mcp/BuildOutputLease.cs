@@ -42,10 +42,14 @@ internal sealed class BuildOutputLease : IDisposable
             {
                 if (new FileInfo(markerPath).Length > 1_048_576)
                     throw new McpFailure("output_not_owned", "MCP ownership marker exceeds its metadata limit.");
-                var marker = JsonSerializer.Deserialize<Owner>(File.ReadAllText(markerPath));
+                Owner? marker;
+                try { marker = JsonSerializer.Deserialize<Owner>(File.ReadAllText(markerPath)); }
+                catch (JsonException) { throw new McpFailure("output_not_owned", "Output root has an invalid MCP ownership marker."); }
                 if (marker is null || marker.Format != 1 || marker.OwnerName != "S4MT.Mcp" ||
                     string.IsNullOrWhiteSpace(marker.RootPath) || !Path.IsPathFullyQualified(marker.RootPath) ||
                     !PathPolicy.Within(root, marker.RootPath) || !PathPolicy.Within(marker.RootPath, root) ||
+                    (marker.ProcessId is null) != (marker.StartTimeTicks is null) ||
+                    marker.ProcessId is <= 0 || marker.StartTimeTicks is <= 0 ||
                     marker.StagingDirectories is null || marker.StagingDirectories.Any(name => !IsStageName(name)))
                     throw new McpFailure("output_not_owned", "Output root has an invalid MCP ownership marker.");
                 lease.state = marker;
@@ -78,7 +82,11 @@ internal sealed class BuildOutputLease : IDisposable
     }
 
     internal void ChildStarted(Process process) => WriteMarker(process);
-    internal void BlockRecovery() => WriteMarker(null, recoveryBlocked: true);
+    internal void BlockRecovery()
+    {
+        var stages = state.StagingDirectories.Concat(EnumerateStageNames()).Distinct(StringComparer.Ordinal).ToArray();
+        PersistMarker(state with { StagingDirectories = stages, RecoveryBlocked = true });
+    }
 
     internal void Complete()
     {
@@ -88,8 +96,7 @@ internal sealed class BuildOutputLease : IDisposable
 
     private void CleanStages()
     {
-        var names = Directory.EnumerateDirectories(root, ".s4mt-stage-*").Select(path => Path.GetRelativePath(root, path))
-            .Where(IsStageName).ToArray();
+        var names = EnumerateStageNames();
         if (state.ProcessId is not null) WriteMarker(null, stages: names);
         if (names.Any(name => !state.StagingDirectories.Contains(name, StringComparer.Ordinal)))
             throw new McpFailure("output_not_owned", "Output root contains staging data without a recorded MCP invocation.");
@@ -107,9 +114,16 @@ internal sealed class BuildOutputLease : IDisposable
     private static bool IsStageName(string name) => name.StartsWith(".s4mt-stage-", StringComparison.Ordinal) &&
         Guid.TryParseExact(name[".s4mt-stage-".Length..], "N", out _);
 
-    private void WriteMarker(Process? process, bool recoveryBlocked = false, string[]? stages = null)
+    private void WriteMarker(Process? process, string[]? stages = null)
     {
-        var marker = new Owner(1, "S4MT.Mcp", root, process?.Id, process?.StartTime.ToUniversalTime().Ticks, stages ?? [], recoveryBlocked);
+        PersistMarker(new Owner(1, "S4MT.Mcp", root, process?.Id, process?.StartTime.ToUniversalTime().Ticks, stages ?? []));
+    }
+
+    private string[] EnumerateStageNames() => Directory.EnumerateDirectories(root, ".s4mt-stage-*")
+        .Select(path => Path.GetRelativePath(root, path)).Where(IsStageName).ToArray();
+
+    private void PersistMarker(Owner marker)
+    {
         var path = Path.Combine(root, MarkerName);
         var temporary = Path.Combine(root, $".s4mt-mcp-owner-{Guid.NewGuid():N}.tmp");
         policy.Write(temporary);

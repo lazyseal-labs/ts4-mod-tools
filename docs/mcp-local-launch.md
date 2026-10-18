@@ -31,6 +31,8 @@ Launch the built host with these command arguments in your stdio client.
 
 Use the built DLL directly. `dotnet run` can add build output to protocol stdout. The host writes diagnostics to stderr. Configuration contains the trusted CLI entrypoint. A native CLI executable can replace the DLL and does not need `dotnetPath`.
 
+Contained CLI execution is currently supported on Windows only. On other platforms, project tools return `cli_unavailable` before inspecting project paths or recovering a build output root. When `cliPath` names a DLL on Windows, `dotnetPath` must include the `.exe` extension.
+
 The host discovers exactly three tools.
 
 - `s4mt_project_init` takes `path` and `name`. Directory paths can contain spaces. The package name must start with an ASCII letter or digit and contain only ASCII letters, digits, dots, underscores, or hyphens. Its maximum length is 64.
@@ -43,7 +45,7 @@ Results contain the full CLI JSON in `structuredContent` and a short text summar
 
 Stable tool error codes include `invalid_arguments`, `path_outside_root`, `read_only_root`, `unsafe_project_path`, `path_collision`, `input_limit`, `output_not_owned`, `output_busy`, `cli_unavailable`, `cli_error`, `malformed_cli_output`, `output_limit`, `timeout`, `cancelled`, `cli_io_error`, `cleanup_failed`, and `file_access_error`. CLI failures retain the exit code and bounded stderr. Metadata files are limited to 1 MiB, and checked directory trees are limited to 20,000 entries.
 
-Cancellation and timeout stop and reap the child process tree. On Windows, process jobs also contain descendants after their parent exits and stop them when the host dies. Under the output lock, the host removes GUID staging directories only from its dedicated marked output root. Output trees cannot contain linked files or directories. A saved child PID and start time prevent recovery while an earlier child is still active. Retry a cancelled build to reuse any complete verified output. Retry init with the same path and name to repair an interrupted scaffold. A `cleanup_failed` marker blocks automatic recovery. Preserve that root for inspection and use a fresh empty output root. Do not edit project files, links, or the dedicated output root during a request. Root checks protect static local paths and do not provide an OS sandbox against concurrent hostile filesystem changes.
+On Windows, cancellation and timeout stop and reap the child process tree. Process jobs also contain descendants after their parent exits and stop them when the host dies. Under the output lock, the host removes GUID staging directories only from its dedicated marked output root. Output trees cannot contain linked files or directories. A saved child PID and start time prevent recovery while an earlier child is still active. Retry a cancelled build to reuse any complete verified output. Retry init with the same path and name to repair an interrupted scaffold. A `cleanup_failed` marker blocks automatic recovery. Preserve that root for inspection and use a fresh empty output root. Do not edit project files, links, or the dedicated output root during a request. Root checks protect static local paths and do not provide an OS sandbox against concurrent hostile filesystem changes.
 
 Run the checked-in stdio client to verify discovery and a project workflow. It saves the actual protocol messages, stderr, and host exit code.
 

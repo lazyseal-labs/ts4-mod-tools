@@ -7,10 +7,33 @@ namespace S4MT.Mcp;
 
 internal sealed record CliReport(JsonElement Report, int ExitCode, string Stderr);
 
-internal sealed class CliProcessRunner(HostOptions options)
+internal sealed class CliProcessRunner
 {
+    private readonly HostOptions options;
+    private readonly Func<int, Process> processResolver;
+    private readonly Func<Stream, int, CancellationTokenSource, Task<byte[]>> capture;
+
+    public CliProcessRunner(HostOptions options) : this(options, Process.GetProcessById, CaptureAsync) { }
+
+    internal CliProcessRunner(HostOptions options, Func<int, Process> processResolver) : this(options, processResolver, CaptureAsync) { }
+
+    internal CliProcessRunner(HostOptions options, Func<int, Process> processResolver,
+        Func<Stream, int, CancellationTokenSource, Task<byte[]>> capture)
+    {
+        this.options = options;
+        this.processResolver = processResolver;
+        this.capture = capture;
+    }
+
+    internal static void EnsureSupportedPlatform(bool windows)
+    {
+        if (!windows)
+            throw new McpFailure("cli_unavailable", "Contained CLI execution is currently supported only on Windows.");
+    }
+
     internal async Task<CliReport> RunAsync(IReadOnlyList<string> arguments, string command, CancellationToken cancellationToken, Action<Process>? childStarted = null)
     {
+        EnsureSupportedPlatform(OperatingSystem.IsWindows());
         cancellationToken.ThrowIfCancellationRequested();
         if (!File.Exists(options.CliPath))
             throw new McpFailure("cli_unavailable", $"Configured CLI does not exist: {options.CliPath}");
@@ -27,31 +50,32 @@ internal sealed class CliProcessRunner(HostOptions options)
         };
         if (isDll) start.ArgumentList.Add(options.CliPath);
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
-        using var child = new Process { StartInfo = start };
+        CliChildProcess invocation;
         try
         {
-            if (!child.Start()) throw new McpFailure("cli_unavailable", "Configured CLI failed to start.");
+            invocation = CliChildProcess.Start(start, job, processResolver);
         }
-        catch (Win32Exception exception)
+        catch (Exception exception) when (exception is Win32Exception or ArgumentException or InvalidOperationException)
         {
             throw new McpFailure("cli_unavailable", $"Could not start configured CLI: {exception.Message}");
         }
-        try { job.Attach(child); childStarted?.Invoke(child); }
+        using var ownedInvocation = invocation;
+        var child = invocation.Process;
+        try { childStarted?.Invoke(child); }
         catch
         {
-            if (!child.HasExited) child.Kill(entireProcessTree: true);
             await job.StopAsync(child);
             await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
             throw;
         }
-        child.StandardInput.Close();
         using var timeout = new CancellationTokenSource(options.TimeoutMilliseconds);
         using var exceeded = new CancellationTokenSource();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token, exceeded.Token);
-        var stdout = CaptureAsync(child.StandardOutput.BaseStream, options.MaximumStdoutBytes, exceeded);
-        var stderr = CaptureAsync(child.StandardError.BaseStream, options.MaximumStderrBytes, exceeded);
+        var stdout = capture(invocation.StandardOutput, options.MaximumStdoutBytes, exceeded);
+        var stderr = capture(invocation.StandardError, options.MaximumStderrBytes, exceeded);
         try
         {
+            invocation.Resume();
             await Task.WhenAll(child.WaitForExitAsync(), stdout, stderr).WaitAsync(linked.Token);
             linked.Token.ThrowIfCancellationRequested();
         }
@@ -59,6 +83,11 @@ internal sealed class CliProcessRunner(HostOptions options)
         {
             await StopAsync(child, job, stdout, stderr);
             throw new McpFailure("cli_io_error", exception.Message);
+        }
+        catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
+        {
+            await StopAsync(child, job, stdout, stderr);
+            throw new McpFailure("cli_unavailable", $"Could not resume configured CLI: {exception.Message}");
         }
         catch (OperationCanceledException)
         {
@@ -99,11 +128,16 @@ internal sealed class CliProcessRunner(HostOptions options)
         {
             await job.StopAsync(child);
             await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
-            await Task.WhenAll(stdout, stderr).WaitAsync(TimeSpan.FromSeconds(5));
         }
         catch (Exception exception) when (exception is Win32Exception or InvalidOperationException or TimeoutException or IOException)
         {
             throw new McpFailure("cleanup_failed", $"Could not confirm child cleanup: {exception.Message}");
+        }
+
+        try { await Task.WhenAll(stdout, stderr).WaitAsync(TimeSpan.FromSeconds(5)); }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or TimeoutException)
+        {
+            // Process termination is confirmed above; a capture failure cannot imply a surviving child.
         }
     }
 

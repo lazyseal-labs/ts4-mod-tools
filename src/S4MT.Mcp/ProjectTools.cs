@@ -77,9 +77,10 @@ internal sealed class ProjectTools(PathPolicy paths, CliProcessRunner runner, IH
 
     private async Task<CallToolResult> Execute(Func<CancellationToken, Task<CliReport>> operation, CancellationToken cancellationToken)
     {
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.ApplicationStopping);
         try
         {
+            CliProcessRunner.EnsureSupportedPlatform(OperatingSystem.IsWindows());
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.ApplicationStopping);
             linked.Token.ThrowIfCancellationRequested();
             var result = await operation(linked.Token);
             var report = result.Report;

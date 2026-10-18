@@ -149,6 +149,74 @@ public sealed class PathPolicyTests
     }
 
     [Fact]
+    public void IncompleteProcessIdentityCannotAuthorizeStagingRecovery()
+    {
+        using var workspace = new TestWorkspace();
+        var root = Path.Combine(workspace.Root, "builds");
+        var policy = new PathPolicy(workspace.Options);
+        using (BuildOutputLease.Acquire(root, policy)) { }
+        var stageName = $".s4mt-stage-{Guid.NewGuid():N}";
+        var stage = Path.Combine(root, stageName);
+        Directory.CreateDirectory(stage);
+        File.WriteAllText(Path.Combine(stage, "keep"), "partial");
+        File.WriteAllText(Path.Combine(root, ".s4mt-mcp-owner.json"), JsonSerializer.Serialize(new
+        {
+            Format = 1,
+            OwnerName = "S4MT.Mcp",
+            RootPath = root,
+            ProcessId = Environment.ProcessId,
+            StagingDirectories = new[] { stageName },
+            RecoveryBlocked = false
+        }));
+        var failure = Assert.Throws<McpFailure>(() => BuildOutputLease.Acquire(root, policy));
+        Assert.Equal("output_not_owned", failure.Code);
+        Assert.Equal("partial", File.ReadAllText(Path.Combine(stage, "keep")));
+    }
+
+    [Fact]
+    public void MalformedOwnerJsonMapsToOutputNotOwnedAndPreservesStaging()
+    {
+        using var workspace = new TestWorkspace();
+        var root = Path.Combine(workspace.Root, "builds");
+        var policy = new PathPolicy(workspace.Options);
+        using (BuildOutputLease.Acquire(root, policy)) { }
+        var stage = Path.Combine(root, $".s4mt-stage-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(stage);
+        File.WriteAllText(Path.Combine(stage, "keep"), "partial");
+        File.WriteAllText(Path.Combine(root, ".s4mt-mcp-owner.json"), "{");
+        var failure = Assert.Throws<McpFailure>(() => BuildOutputLease.Acquire(root, policy));
+        Assert.Equal("output_not_owned", failure.Code);
+        Assert.Equal("partial", File.ReadAllText(Path.Combine(stage, "keep")));
+    }
+
+    [Fact]
+    public void BlockRecoveryRetainsKnownProcessAndStagingMetadata()
+    {
+        using var workspace = new TestWorkspace();
+        var root = Path.Combine(workspace.Root, "builds");
+        var policy = new PathPolicy(workspace.Options);
+        var stageName = $".s4mt-stage-{Guid.NewGuid():N}";
+        var stage = Path.Combine(root, stageName);
+        using (var lease = BuildOutputLease.Acquire(root, policy))
+        using (var child = Process.GetCurrentProcess())
+        {
+            lease.ChildStarted(child);
+            Directory.CreateDirectory(stage);
+            File.WriteAllText(Path.Combine(stage, "keep"), "partial");
+            lease.BlockRecovery();
+        }
+        using var marker = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, ".s4mt-mcp-owner.json")));
+        var owner = marker.RootElement;
+        Assert.True(owner.GetProperty("RecoveryBlocked").GetBoolean());
+        Assert.Equal(Environment.ProcessId, owner.GetProperty("ProcessId").GetInt32());
+        Assert.True(owner.GetProperty("StartTimeTicks").GetInt64() > 0);
+        Assert.Contains(stageName, owner.GetProperty("StagingDirectories").EnumerateArray().Select(item => item.GetString()));
+        var failure = Assert.Throws<McpFailure>(() => BuildOutputLease.Acquire(root, policy));
+        Assert.Equal("cleanup_failed", failure.Code);
+        Assert.Equal("partial", File.ReadAllText(Path.Combine(stage, "keep")));
+    }
+
+    [Fact]
     public void DanglingLinkCannotBypassConfiguredWriteRoot()
     {
         using var workspace = new TestWorkspace();
@@ -157,7 +225,7 @@ public sealed class PathPolicyTests
         workspace.DirectoryLink(Path.Combine(project, "dangling"), missingTarget);
         var policy = new PathPolicy(workspace.Options with { WriteRoots = [project] });
         var error = Assert.Throws<McpFailure>(() => policy.Write(Path.Combine(project, "dangling", "new-file")));
-        Assert.Contains(error.Code, new[] { "unsafe_project_path", "path_outside_root" });
+        Assert.Equal(OperatingSystem.IsWindows() ? "path_outside_root" : "unsafe_project_path", error.Code);
         Assert.False(Directory.Exists(missingTarget));
     }
 }

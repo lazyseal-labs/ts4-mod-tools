@@ -28,7 +28,11 @@ internal sealed record HostOptions
     {
         Absolute(CliPath);
         if (Path.GetExtension(CliPath).Equals(".dll", StringComparison.OrdinalIgnoreCase))
+        {
             Absolute(DotnetPath);
+            if (OperatingSystem.IsWindows() && !Path.GetExtension(DotnetPath!).Equals(".exe", StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("dotnetPath must name a .exe executable on Windows.");
+        }
         else if (OperatingSystem.IsWindows() && !Path.GetExtension(CliPath).Equals(".exe", StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("cliPath must name a CLI executable or DLL.");
         if (ReadRoots is not { Length: > 0 } || WriteRoots is not { Length: > 0 } || GameRoots is null)

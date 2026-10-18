@@ -165,9 +165,16 @@ def main():
                 client.begin('tools/call', {'name': 's4mt_project_build', 'arguments': arguments})
                 wait(lambda: (fixture / 'descendant.pid').exists())
                 crashed_pids = [int((fixture / file).read_text()) for file in ('child.pid', 'descendant.pid')]
+                crashed_host_pid = client.process.pid
                 client.process.kill()
                 client.process.wait(timeout=5)
                 wait(lambda: all(not alive(pid) for pid in crashed_pids))
+                crashed_host_exit_code = client.process.returncode
+                results['crashedHost'] = {
+                    'pid': crashed_host_pid,
+                    'exitCode': crashed_host_exit_code,
+                    'cliPids': crashed_pids,
+                    'cliProcessesStopped': all(not alive(pid) for pid in crashed_pids)}
                 client.close()
                 results['crashedHostTranscript'] = client.transcript
                 results['crashedHostStderr'] = ''.join(client.stderr)
