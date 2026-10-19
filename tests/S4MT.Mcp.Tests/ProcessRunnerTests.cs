@@ -176,6 +176,32 @@ public sealed class ProcessRunnerTests
     }
 
     [WindowsFact]
+    public async Task ChildCannotSpawnBeforeOwnershipJournalCompletes()
+    {
+        using var workspace = new TestWorkspace("wait", timeout: 10000);
+        using var cancellation = new CancellationTokenSource();
+        var runner = new CliProcessRunner(workspace.Options);
+        var journaledPid = 0;
+        var run = runner.RunAsync(["project", "validate"], "project.validate", cancellation.Token, child =>
+        {
+            journaledPid = child.Id;
+            Thread.Sleep(1000);
+            Assert.False(File.Exists(Path.Combine(workspace.Root, "child.pid")));
+            Assert.False(File.Exists(Path.Combine(workspace.Root, "descendant.pid")));
+        });
+
+        var childPid = await workspace.WaitForPid("child.pid");
+        var descendantPid = await workspace.WaitForPid("descendant.pid");
+        cancellation.Cancel();
+        var failure = await Assert.ThrowsAsync<McpFailure>(() => run);
+
+        Assert.Equal("cancelled", failure.Code);
+        Assert.Equal(journaledPid, childPid);
+        Assert.False(TestWorkspace.Alive(childPid));
+        Assert.False(TestWorkspace.Alive(descendantPid));
+    }
+
+    [WindowsFact]
     public async Task ChildStartJournalFailureStopsTheSuspendedJob()
     {
         using var workspace = new TestWorkspace("wait");
