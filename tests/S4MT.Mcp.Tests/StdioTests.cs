@@ -44,7 +44,7 @@ public sealed class StdioTests
         Assert.Equal(3, (await client.ListToolsAsync()).Count);
     }
 
-    [NonWindowsFact]
+    [UnsupportedPlatformFact]
     public async Task UnsupportedPlatformReturnsStableErrorThroughProtocol()
     {
         using var workspace = new TestWorkspace();

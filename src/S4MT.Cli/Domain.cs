@@ -168,6 +168,11 @@ public sealed record GameFindReport(
     int Limit,
     bool Truncated,
     bool PrecedenceVerified,
+    string GameVersion,
+    string Fingerprint,
+    int PackageCount,
+    long ResourceCount,
+    DateTimeOffset GeneratedUtc,
     IReadOnlyList<GameFindResource> Resources);
 
 public sealed record GameProviderLookupReport(

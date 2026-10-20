@@ -60,7 +60,7 @@ public sealed class ProcessRunnerTests
     public async Task DescendantStopsEvenWhenParentExitsFirst()
     {
         using var workspace = new TestWorkspace("orphan", timeout: 1500);
-        if (!OperatingSystem.IsWindows())
+        if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux())
         {
             var unsupported = await Assert.ThrowsAsync<McpFailure>(() => new CliProcessRunner(workspace.Options)
                 .RunAsync(["project", "validate"], "project.validate", CancellationToken.None));
@@ -81,7 +81,7 @@ public sealed class ProcessRunnerTests
     public async Task TimeoutAndCancellationReapWholeChildTree(bool cancel)
     {
         using var workspace = new TestWorkspace("wait", timeout: cancel ? 10000 : 1500);
-        if (!OperatingSystem.IsWindows())
+        if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux())
         {
             var unsupported = await Assert.ThrowsAsync<McpFailure>(() => new CliProcessRunner(workspace.Options)
                 .RunAsync(["project", "validate"], "project.validate", CancellationToken.None));

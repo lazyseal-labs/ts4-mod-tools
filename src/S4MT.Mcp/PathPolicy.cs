@@ -6,12 +6,23 @@ namespace S4MT.Mcp
     internal sealed class PathPolicy(HostOptions options)
     {
         private const int MaximumFiles = 20_000;
+        private readonly string? cacheRoot = ValidateCacheRoot(options);
+
         internal string Read(string path)
         {
             var full = HostOptions.Absolute(path);
             RejectDanglingLinks(full);
             if (!options.ReadRoots.Concat(options.GameRoots).Any(root => Within(full, root)))
                 throw new McpFailure("path_outside_root", $"Read path is outside configured roots: {full}");
+            return full;
+        }
+
+        internal string GameIndex(string path)
+        {
+            var full = HostOptions.Absolute(path);
+            RejectDanglingLinks(full);
+            if (cacheRoot is null || !Within(full, cacheRoot) || !File.Exists(full))
+                throw new McpFailure("path_outside_root", "The active game index is outside the configured cache root or is missing.");
             return full;
         }
 
@@ -140,6 +151,16 @@ namespace S4MT.Mcp
         {
             try { PathGuard.EnsureWithinDirectory(path, root, "Path"); return true; }
             catch (CliInputException) { return false; }
+        }
+
+        private static string? ValidateCacheRoot(HostOptions options)
+        {
+            if (options.GameIndexCacheRoot is null) return null;
+            var cache = HostOptions.Absolute(options.GameIndexCacheRoot);
+            if (options.ReadRoots.Concat(options.WriteRoots).Concat(options.GameRoots)
+                .Any(root => Within(cache, root) || Within(root, cache)))
+                throw new ArgumentException("gameIndexCacheRoot must be disjoint from readRoots, writeRoots, and gameRoots.");
+            return cache;
         }
 
         private static void RejectDanglingLinks(string fullPath)

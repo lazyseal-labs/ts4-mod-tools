@@ -367,6 +367,11 @@ internal static class S4mtCli
             limit = report.Limit,
             truncated = report.Truncated,
             precedenceVerified = report.PrecedenceVerified,
+            gameVersion = report.GameVersion,
+            fingerprint = report.Fingerprint,
+            packageCount = report.PackageCount,
+            resourceCount = report.ResourceCount,
+            generatedUtc = report.GeneratedUtc,
             resources = report.Resources
         });
         return 0;

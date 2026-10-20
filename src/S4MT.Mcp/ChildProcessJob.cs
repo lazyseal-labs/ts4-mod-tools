@@ -13,13 +13,19 @@ internal sealed class ChildProcessJob : IDisposable
     private const uint ChildTerminationExitCode = 130;
     private const int PollDelayMilliseconds = 10;
     private const int CleanupTimeoutMilliseconds = 5000;
+    private const int GracefulStopMilliseconds = 3000;
+    private const int SignalTerm = 15;
+    private const int SignalKill = 9;
+    private const int ErrorNoSuchProcess = 3;
 
     private static ChildProcessJob? hostLifetime;
     private readonly SafeFileHandle? handle;
+    private int? processGroupId;
     internal SafeFileHandle? Handle => handle;
 
     internal static void ContainHostLifetime()
     {
+        if (!OperatingSystem.IsWindows()) return;
         hostLifetime = new ChildProcessJob();
         using var host = Process.GetCurrentProcess();
         hostLifetime.Attach(host);
@@ -47,12 +53,31 @@ internal sealed class ChildProcessJob : IDisposable
 
     internal void Attach(Process child)
     {
+        if (OperatingSystem.IsLinux())
+        {
+            var group = GetProcessGroupId(child.Id);
+            if (group != child.Id)
+            {
+                var detail = group < 0
+                    ? new Win32Exception(Marshal.GetLastPInvokeError()).Message
+                    : $"the process belongs to unexpected group {group}";
+                throw new McpFailure("cli_unavailable", $"Could not isolate the Linux CLI process group: {detail}.");
+            }
+            processGroupId = group;
+            return;
+        }
         if (handle is not null && !AssignProcessToJobObject(handle, child.Handle))
             throw new McpFailure("cli_unavailable", $"Could not contain CLI process: {new Win32Exception(Marshal.GetLastWin32Error()).Message}");
     }
 
     internal async Task StopAsync(Process child)
     {
+        if (OperatingSystem.IsLinux())
+        {
+            await StopLinuxProcessGroupAsync(child, processGroupId
+                ?? throw new McpFailure("cleanup_failed", "The Linux CLI process group was not recorded."));
+            return;
+        }
         if (handle is null)
         {
             if (!child.HasExited) child.Kill(entireProcessTree: true);
@@ -69,6 +94,49 @@ internal sealed class ChildProcessJob : IDisposable
             try { await Task.Delay(PollDelayMilliseconds, deadline.Token); }
             catch (OperationCanceledException) { throw new McpFailure("cleanup_failed", "CLI process job did not stop within five seconds."); }
         }
+    }
+
+    private static async Task StopLinuxProcessGroupAsync(Process child, int group)
+    {
+        SignalGroup(group, SignalTerm);
+        var gracefulDeadline = DateTime.UtcNow.AddMilliseconds(GracefulStopMilliseconds);
+        while (DateTime.UtcNow < gracefulDeadline)
+        {
+            if (child.HasExited) await child.WaitForExitAsync();
+            if (!LinuxProcessGroupExists(group)) return;
+            await Task.Delay(PollDelayMilliseconds);
+        }
+
+        SignalGroup(group, SignalKill);
+        try { await child.WaitForExitAsync().WaitAsync(TimeSpan.FromMilliseconds(CleanupTimeoutMilliseconds)); }
+        catch (Exception exception) when (exception is InvalidOperationException or TimeoutException or Win32Exception)
+        {
+            throw new McpFailure("cleanup_failed", $"Could not confirm Linux CLI process exit: {exception.Message}");
+        }
+
+        var cleanupDeadline = DateTime.UtcNow.AddMilliseconds(CleanupTimeoutMilliseconds);
+        while (LinuxProcessGroupExists(group))
+        {
+            if (DateTime.UtcNow >= cleanupDeadline)
+                throw new McpFailure("cleanup_failed", "Linux CLI process group did not stop within five seconds.");
+            await Task.Delay(PollDelayMilliseconds);
+        }
+    }
+
+    private static void SignalGroup(int group, int signal)
+    {
+        if (SendSignal(-group, signal) == 0) return;
+        var error = Marshal.GetLastPInvokeError();
+        if (error == ErrorNoSuchProcess) return;
+        throw new McpFailure("cleanup_failed", $"Could not signal the Linux CLI process group: {new Win32Exception(error).Message}");
+    }
+
+    private static bool LinuxProcessGroupExists(int group)
+    {
+        if (SendSignal(-group, 0) == 0) return true;
+        var error = Marshal.GetLastPInvokeError();
+        if (error == ErrorNoSuchProcess) return false;
+        throw new McpFailure("cleanup_failed", $"Could not inspect the Linux CLI process group: {new Win32Exception(error).Message}");
     }
 
     public void Dispose() => handle?.Dispose();
@@ -115,4 +183,9 @@ internal sealed class ChildProcessJob : IDisposable
     private static extern bool TerminateJobObject(SafeFileHandle job, uint exitCode);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool QueryInformationJobObject(SafeFileHandle job, int informationClass, out Accounting information, uint length, IntPtr returnedLength);
+
+    [DllImport("libc", EntryPoint = "getpgid", SetLastError = true)]
+    private static extern int GetProcessGroupId(int processId);
+    [DllImport("libc", EntryPoint = "kill", SetLastError = true)]
+    private static extern int SendSignal(int processId, int signal);
 }

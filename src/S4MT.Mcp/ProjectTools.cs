@@ -8,7 +8,11 @@ using ModelContextProtocol.Server;
 namespace S4MT.Mcp;
 
 [McpServerToolType]
-internal sealed class ProjectTools(PathPolicy paths, CliProcessRunner runner, IHostApplicationLifetime lifetime)
+internal sealed class ProjectTools(
+    PathPolicy paths,
+    CliProcessRunner runner,
+    IHostApplicationLifetime lifetime,
+    GameIndexStore? gameIndexStore = null)
 {
     [McpServerTool(Name = "s4mt_project_init", Destructive = false)]
     [Description("Create or repair an S4MT project scaffold in an explicit writable directory. Existing project names must match. Does not install or launch anything.")]
@@ -30,14 +34,18 @@ internal sealed class ProjectTools(PathPolicy paths, CliProcessRunner runner, IH
     public Task<CallToolResult> Validate(
         [Description("Absolute project directory or project JSON file under configured read roots.")] string project,
         CancellationToken cancellationToken,
-        [Description("Optional absolute read-only game index file under configured read or game roots.")] string? gameIndex = null) => Execute(async token =>
+        [Description("Optional absolute read-only game index file under configured read or game roots. If omitted, the server's active game cache is used when configured.")] string? gameIndex = null)
     {
-        var input = paths.Read(project);
-        paths.ProjectInputs(input);
-        var arguments = new List<string> { "project", "validate", "--project", input };
-        AddGameIndex(arguments, gameIndex);
-        return await runner.RunAsync(arguments, "project.validate", token);
-    }, cancellationToken);
+        GameIndexArtifact? usedCache = null;
+        return Execute(async token =>
+        {
+            var input = paths.Read(project);
+            paths.ProjectInputs(input);
+            var arguments = new List<string> { "project", "validate", "--project", input };
+            AddGameIndex(arguments, SelectGameIndex(gameIndex, out usedCache));
+            return await runner.RunAsync(arguments, "project.validate", token);
+        }, cancellationToken, () => usedCache);
+    }
 
     [McpServerTool(Name = "s4mt_project_build", Destructive = false, Idempotent = true)]
     [Description("Build and read back an S4MT package and script bundle. Requires an empty or MCP-owned dedicated output root. Repeated builds reuse verified fingerprints. Package verification does not prove in-game behavior.")]
@@ -45,41 +53,57 @@ internal sealed class ProjectTools(PathPolicy paths, CliProcessRunner runner, IH
         [Description("Absolute project directory or project JSON file under configured read roots.")] string project,
         [Description("Absolute dedicated build directory under a write root. Must be empty on first use. Game roots are read-only.")] string outputRoot,
         CancellationToken cancellationToken,
-        [Description("Optional absolute read-only game index file.")] string? gameIndex = null) => Execute(async token =>
+        [Description("Optional absolute read-only game index file. If omitted, the server's active game cache is used when configured.")] string? gameIndex = null)
     {
-        var input = paths.Read(project);
-        var output = paths.Write(outputRoot);
-        var inputs = paths.ProjectInputs(input);
-        var arguments = new List<string> { "project", "build", "--project", input, "--output-root", output };
-        AddGameIndex(arguments, gameIndex);
-        paths.NoCollision(output, gameIndex is null ? inputs : inputs.Append(paths.Read(gameIndex)));
-        using var lease = BuildOutputLease.Acquire(output, paths);
-        try
+        GameIndexArtifact? usedCache = null;
+        return Execute(async token =>
         {
-            var result = await runner.RunAsync(arguments, "project.build", token, lease.ChildStarted);
-            lease.Complete();
-            return result;
-        }
-        catch (McpFailure exception)
-        {
-            if (exception.Code == "cleanup_failed") lease.BlockRecovery();
-            else lease.Complete();
-            throw;
-        }
-    }, cancellationToken);
+            var input = paths.Read(project);
+            var output = paths.Write(outputRoot);
+            var inputs = paths.ProjectInputs(input);
+            var arguments = new List<string> { "project", "build", "--project", input, "--output-root", output };
+            var selectedGameIndex = SelectGameIndex(gameIndex, out usedCache);
+            AddGameIndex(arguments, selectedGameIndex);
+            paths.NoCollision(output, selectedGameIndex is null ? inputs : inputs.Append(selectedGameIndex));
+            using var lease = BuildOutputLease.Acquire(output, paths);
+            try
+            {
+                var result = await runner.RunAsync(arguments, "project.build", token, lease.ChildStarted);
+                lease.Complete();
+                return result;
+            }
+            catch (McpFailure exception)
+            {
+                if (exception.Code == "cleanup_failed") lease.BlockRecovery();
+                else lease.Complete();
+                throw;
+            }
+        }, cancellationToken, () => usedCache);
+    }
 
-    private void AddGameIndex(List<string> arguments, string? index)
+    private string? SelectGameIndex(string? requestedIndex, out GameIndexArtifact? selectedArtifact)
+    {
+        selectedArtifact = null;
+        if (requestedIndex is not null) return paths.Read(requestedIndex);
+        selectedArtifact = gameIndexStore?.Active;
+        return selectedArtifact is null ? null : paths.GameIndex(selectedArtifact.Path);
+    }
+
+    private static void AddGameIndex(List<string> arguments, string? index)
     {
         if (index is null) return;
         arguments.Add("--game-index");
-        arguments.Add(paths.Read(index));
+        arguments.Add(index);
     }
 
-    private async Task<CallToolResult> Execute(Func<CancellationToken, Task<CliReport>> operation, CancellationToken cancellationToken)
+    private async Task<CallToolResult> Execute(
+        Func<CancellationToken, Task<CliReport>> operation,
+        CancellationToken cancellationToken,
+        Func<GameIndexArtifact?>? gameIndexProvenance = null)
     {
         try
         {
-            CliProcessRunner.EnsureSupportedPlatform(OperatingSystem.IsWindows());
+            CliProcessRunner.EnsureSupportedPlatform(OperatingSystem.IsWindows(), OperatingSystem.IsLinux());
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.ApplicationStopping);
             linked.Token.ThrowIfCancellationRequested();
             var result = await operation(linked.Token);
@@ -89,11 +113,18 @@ internal sealed class ProjectTools(PathPolicy paths, CliProcessRunner runner, IH
             var diagnostics = report.TryGetProperty("diagnostics", out var items) && items.ValueKind == JsonValueKind.Array ? items.GetArrayLength() : 0;
             var summary = $"{command} {status}. {diagnostics} diagnostics. CLI exit {result.ExitCode}.";
             if (!string.IsNullOrEmpty(result.Stderr)) summary += " CLI stderr is available in _meta.cliStderr.";
+            var metadata = new JsonObject { ["cliExitCode"] = result.ExitCode, ["cliStderr"] = result.Stderr };
+            if (gameIndexProvenance?.Invoke() is { } artifact)
+            {
+                metadata["gameIndexSha256"] = artifact.Sha256;
+                metadata["gameIndexGameVersion"] = artifact.GameVersion;
+                metadata["gameIndexFingerprint"] = artifact.Fingerprint;
+            }
             return new CallToolResult
             {
                 StructuredContent = report,
                 Content = [new TextContentBlock { Text = summary }],
-                Meta = new JsonObject { ["cliExitCode"] = result.ExitCode, ["cliStderr"] = result.Stderr }
+                Meta = metadata
             };
         }
         catch (OperationCanceledException)

@@ -218,18 +218,16 @@ internal sealed class GameCatalogWork
             if (recordType != "resource" || headerSeen)
                 throw new InvalidDataException("Game index record order or type is invalid.");
 
+            var entry = document.RootElement.Deserialize<IndexEntry>(JsonOptions)
+                ?? throw new InvalidDataException("Game index resource record is empty.");
             resourceCount++;
-            var tgi = document.RootElement.GetProperty("tgi").GetString();
-            if (tgi is null || !tgi.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            var tgi = entry.Tgi;
+            if (!tgi.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 continue;
 
             matchCount++;
             if (resources.Count < limit)
-            {
-                var entry = document.RootElement.Deserialize<IndexEntry>(JsonOptions)
-                    ?? throw new InvalidDataException("Game index resource record is empty.");
                 resources.Add(new GameFindResource(entry.Tgi, entry.Source, entry.Layer, entry.Pack, entry.LayerPriority));
-            }
         }
 
         if (header is null || header.Format != 2 || header.ResourceCount != resourceCount)
@@ -242,6 +240,11 @@ internal sealed class GameCatalogWork
             limit,
             matchCount > resources.Count,
             header.PrecedenceVerified,
+            header.GameVersion,
+            header.Fingerprint,
+            header.PackageCount,
+            resourceCount,
+            header.GeneratedUtc,
             resources);
     }
 

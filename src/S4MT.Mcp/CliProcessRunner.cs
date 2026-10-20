@@ -25,15 +25,17 @@ internal sealed class CliProcessRunner
         this.capture = capture;
     }
 
-    internal static void EnsureSupportedPlatform(bool windows)
+    internal static void EnsureSupportedPlatform(bool windows) => EnsureSupportedPlatform(windows, linux: false);
+
+    internal static void EnsureSupportedPlatform(bool windows, bool linux)
     {
-        if (!windows)
-            throw new McpFailure("cli_unavailable", "Contained CLI execution is currently supported only on Windows.");
+        if (!windows && !linux)
+            throw new McpFailure("cli_unavailable", "Contained CLI execution is supported on Windows and Linux.");
     }
 
     internal async Task<CliReport> RunAsync(IReadOnlyList<string> arguments, string command, CancellationToken cancellationToken, Action<Process>? childStarted = null)
     {
-        EnsureSupportedPlatform(OperatingSystem.IsWindows());
+        EnsureSupportedPlatform(OperatingSystem.IsWindows(), OperatingSystem.IsLinux());
         cancellationToken.ThrowIfCancellationRequested();
         if (!File.Exists(options.CliPath))
             throw new McpFailure("cli_unavailable", $"Configured CLI does not exist: {options.CliPath}");
@@ -158,6 +160,12 @@ internal sealed class CliProcessRunner
             var invalid = report.TryGetProperty("valid", out var valid) && valid.ValueKind == JsonValueKind.False;
             if (command == "project.init")
                 Require(report, ("projectFile", JsonValueKind.String), ("packageManifest", JsonValueKind.String), ("created", null));
+            else if (command == "game.find")
+                Require(report,
+                    ("index", JsonValueKind.String), ("type", JsonValueKind.String), ("matchCount", JsonValueKind.Number),
+                    ("resources", JsonValueKind.Array), ("gameVersion", JsonValueKind.String),
+                    ("fingerprint", JsonValueKind.String), ("packageCount", JsonValueKind.Number),
+                    ("resourceCount", JsonValueKind.Number), ("generatedUtc", JsonValueKind.String));
             else
             {
                 Require(report, ("diagnostics", JsonValueKind.Array), ("resourceCount", JsonValueKind.Number), ("scriptArchiveCount", JsonValueKind.Number));
@@ -168,7 +176,8 @@ internal sealed class CliProcessRunner
                 return new CliReport(report.Clone(), exitCode, stderr);
             if (exitCode != 0)
                 throw new McpFailure("cli_error", "CLI returned an unsuccessful exit code.", exitCode, stderr);
-            if (command != "project.init" && (!report.TryGetProperty("valid", out valid) || valid.ValueKind != JsonValueKind.True))
+            if (command is not ("project.init" or "game.find") &&
+                (!report.TryGetProperty("valid", out valid) || valid.ValueKind != JsonValueKind.True))
                 throw new JsonException("Successful validation/build must report valid:true.");
             return new CliReport(report.Clone(), exitCode, stderr);
         }

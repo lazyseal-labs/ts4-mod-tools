@@ -6,7 +6,7 @@ namespace S4MT.Mcp.Tests;
 
 public sealed class PlatformSupportTests
 {
-    [NonWindowsFact]
+    [UnsupportedPlatformFact]
     public async Task UnsupportedPlatformRejectsBuildBeforeOutputRecovery()
     {
         using var workspace = new TestWorkspace();

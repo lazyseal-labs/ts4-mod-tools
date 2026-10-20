@@ -10,6 +10,15 @@ internal sealed record HostOptions
     public required string[] ReadRoots { get; init; }
     public required string[] WriteRoots { get; init; }
     public required string[] GameRoots { get; init; }
+    public string Transport { get; init; } = "stdio";
+    public string HttpListenUrl { get; init; } = "http://127.0.0.1:8080";
+    public string? HttpBearerTokenFile { get; init; }
+    public string? CacheAdminBearerTokenFile { get; init; }
+    public string? GameIndexCacheRoot { get; init; }
+    public long MaximumGameIndexBytes { get; init; } = 536_870_912;
+    public long MaximumGameIndexUncompressedBytes { get; init; } = 8_589_934_592;
+    public long MaximumRetainedGameIndexBytes { get; init; } = 4_294_967_296;
+    public int MaximumGameIndexImportMilliseconds { get; init; } = 1_800_000;
     public int TimeoutMilliseconds { get; init; } = 30_000;
     public int MaximumStdoutBytes { get; init; } = 1_048_576;
     public int MaximumStderrBytes { get; init; } = 65_536;
@@ -38,6 +47,38 @@ internal sealed record HostOptions
         if (ReadRoots is not { Length: > 0 } || WriteRoots is not { Length: > 0 } || GameRoots is null)
             throw new ArgumentException("Configure readRoots, writeRoots, and gameRoots explicitly. Read and write roots cannot be empty.");
         foreach (var root in ReadRoots.Concat(WriteRoots).Concat(GameRoots)) Absolute(root);
+        if (Transport is not ("stdio" or "http"))
+            throw new ArgumentException("transport must be either 'stdio' or 'http'.");
+        if (Transport == "http")
+        {
+            if (!Uri.TryCreate(HttpListenUrl, UriKind.Absolute, out var listenUri) ||
+                listenUri.Scheme is not ("http" or "https") || listenUri.Port is < 1 or > 65535)
+                throw new ArgumentException("httpListenUrl must be an absolute HTTP or HTTPS URL with a valid port.");
+            if (listenUri.Scheme == "http" && !listenUri.IsLoopback)
+                throw new ArgumentException("Plain HTTP must bind to loopback. Use HTTPS or a TLS reverse proxy for remote access.");
+            Absolute(HttpBearerTokenFile);
+            Absolute(CacheAdminBearerTokenFile);
+            Absolute(GameIndexCacheRoot);
+            var tokenPath = Path.GetFullPath(HttpBearerTokenFile!);
+            var adminTokenPath = Path.GetFullPath(CacheAdminBearerTokenFile!);
+            var cacheRoot = Path.GetFullPath(GameIndexCacheRoot!);
+            var configuredRoots = ReadRoots.Concat(WriteRoots).Concat(GameRoots).ToArray();
+            if (configuredRoots.Any(root => PathPolicy.Within(cacheRoot, root) || PathPolicy.Within(root, cacheRoot)))
+                throw new ArgumentException("gameIndexCacheRoot must be disjoint from readRoots, writeRoots, and gameRoots.");
+            if (tokenPath.Equals(adminTokenPath, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                throw new ArgumentException("httpBearerTokenFile and cacheAdminBearerTokenFile must be separate files.");
+            foreach (var tokenFile in new[] { tokenPath, adminTokenPath })
+                if (configuredRoots.Any(root => PathPolicy.Within(tokenFile, root) || PathPolicy.Within(root, tokenFile)) ||
+                    PathPolicy.Within(tokenFile, cacheRoot) || PathPolicy.Within(cacheRoot, tokenFile))
+                    throw new ArgumentException("Bearer token files must be outside readRoots, writeRoots, gameRoots, and gameIndexCacheRoot.");
+            if (MaximumGameIndexBytes is < 1_024 or > 2_147_483_647)
+                throw new ArgumentException("maximumGameIndexBytes must be between 1024 and 2147483647.");
+            if (MaximumGameIndexUncompressedBytes is < 1_024 or > 1_099_511_627_776 ||
+                MaximumRetainedGameIndexBytes is < 1_024 or > 1_099_511_627_776)
+                throw new ArgumentException("Game-index expanded and retained size limits must be between 1024 bytes and 1 TiB.");
+            if (MaximumGameIndexImportMilliseconds is < 1_000 or > 3_600_000)
+                throw new ArgumentException("maximumGameIndexImportMilliseconds must be between 1000 and 3600000.");
+        }
         if (TimeoutMilliseconds is < 1 or > 600_000 ||
             MaximumStdoutBytes is < 256 or > 16_777_216 || MaximumStderrBytes is < 256 or > 1_048_576)
             throw new ArgumentException("Invalid timeout or output limits.");

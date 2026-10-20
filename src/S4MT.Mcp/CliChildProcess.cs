@@ -19,34 +19,107 @@ internal sealed class CliChildProcess : IDisposable
     private const uint ExpectedPreviousSuspendCount = 1;
     private const nuint ProcThreadAttributeHandleList = 0x00020002;
     private const nuint ProcThreadAttributeJobList = 0x0002000D;
+    private const string LinuxStartGate = "IFS= read -r _ || exit 130; exec \"$@\"";
 
     internal Process Process { get; }
     internal Stream StandardOutput { get; }
     internal Stream StandardError { get; }
-    private readonly SafeFileHandle initialThread;
+    private readonly SafeFileHandle? initialThread;
+    private Stream? startGate;
 
-    private CliChildProcess(Process process, Stream stdout, Stream stderr, SafeFileHandle initialThread)
+    private CliChildProcess(Process process, Stream stdout, Stream stderr, SafeFileHandle? initialThread, Stream? startGate = null)
     {
         Process = process;
         StandardOutput = stdout;
         StandardError = stderr;
         this.initialThread = initialThread;
+        this.startGate = startGate;
     }
 
     internal static CliChildProcess Start(ProcessStartInfo start, ChildProcessJob job, Func<int, Process> processResolver)
     {
-        if (!OperatingSystem.IsWindows())
-            throw new McpFailure("cli_unavailable", "Contained CLI execution is currently supported only on Windows.");
-        return StartWindows(start, job.Handle!, processResolver);
+        if (OperatingSystem.IsWindows()) return StartWindows(start, job.Handle!, processResolver);
+        if (OperatingSystem.IsLinux()) return StartLinux(start, job);
+        throw new McpFailure("cli_unavailable", "Contained CLI execution is currently supported on Windows and Linux.");
     }
 
     internal void Resume()
     {
+        if (initialThread is null)
+        {
+            var gate = startGate ?? throw new InvalidOperationException("Linux CLI start gate was already released.");
+            gate.WriteByte((byte)'\n');
+            gate.Flush();
+            gate.Dispose();
+            startGate = null;
+            return;
+        }
         var previousSuspendCount = ResumeThread(initialThread);
         if (previousSuspendCount == uint.MaxValue) throw new Win32Exception(Marshal.GetLastWin32Error());
         RequireSingleResume(previousSuspendCount);
         initialThread.Dispose();
     }
+
+    private static CliChildProcess StartLinux(ProcessStartInfo start, ChildProcessJob job)
+    {
+        var setsid = File.Exists("/usr/bin/setsid") ? "/usr/bin/setsid" : "/bin/setsid";
+        if (!File.Exists(setsid))
+            throw new McpFailure("cli_unavailable", "Linux CLI execution requires the setsid utility from util-linux.");
+
+        var launch = new ProcessStartInfo(setsid)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = start.WorkingDirectory
+        };
+        launch.ArgumentList.Add("/bin/sh");
+        launch.ArgumentList.Add("-c");
+        launch.ArgumentList.Add(LinuxStartGate);
+        launch.ArgumentList.Add("s4mt-cli-launch");
+        launch.ArgumentList.Add(start.FileName);
+        foreach (var argument in start.ArgumentList) launch.ArgumentList.Add(argument);
+
+        var process = new Process { StartInfo = launch };
+        try
+        {
+            if (!process.Start()) throw new InvalidOperationException("Could not start the Linux CLI launcher.");
+            WaitForIsolatedProcessGroup(process);
+            job.Attach(process);
+            return new CliChildProcess(process, process.StandardOutput.BaseStream, process.StandardError.BaseStream,
+                initialThread: null, process.StandardInput.BaseStream);
+        }
+        catch
+        {
+            if (!process.HasExited)
+            {
+                try { job.Attach(process); job.StopAsync(process).GetAwaiter().GetResult(); }
+                catch { process.Kill(entireProcessTree: true); }
+                try { process.WaitForExit(5000); } catch (InvalidOperationException) { }
+            }
+            process.Dispose();
+            throw;
+        }
+    }
+
+    private static void WaitForIsolatedProcessGroup(Process process)
+    {
+        var deadline = Stopwatch.StartNew();
+        while (deadline.Elapsed < TimeSpan.FromSeconds(5))
+        {
+            if (process.HasExited)
+                throw new InvalidOperationException("The Linux CLI launcher exited before establishing its process group.");
+            var group = GetProcessGroupId(process.Id);
+            if (group == process.Id) return;
+            Thread.Sleep(10);
+        }
+        throw new InvalidOperationException("The Linux CLI launcher did not establish an isolated process group.");
+    }
+
+    [DllImport("libc", EntryPoint = "getpgid", SetLastError = true)]
+    private static extern int GetProcessGroupId(int processId);
 
     internal static void RequireSingleResume(uint previousSuspendCount)
     {
@@ -180,7 +253,8 @@ internal sealed class CliChildProcess : IDisposable
 
     public void Dispose()
     {
-        initialThread.Dispose();
+        startGate?.Dispose();
+        initialThread?.Dispose();
         StandardOutput.Dispose();
         StandardError.Dispose();
         Process.Dispose();

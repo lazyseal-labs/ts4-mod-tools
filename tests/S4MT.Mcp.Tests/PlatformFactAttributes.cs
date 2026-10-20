@@ -18,10 +18,11 @@ internal sealed class WindowsTheoryAttribute : TheoryAttribute
     }
 }
 
-internal sealed class NonWindowsFactAttribute : FactAttribute
+internal sealed class UnsupportedPlatformFactAttribute : FactAttribute
 {
-    public NonWindowsFactAttribute()
+    public UnsupportedPlatformFactAttribute()
     {
-        if (OperatingSystem.IsWindows()) Skip = "This test verifies the unsupported-platform boundary.";
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
+            Skip = "This test verifies the unsupported-platform boundary outside Windows and Linux.";
     }
 }
