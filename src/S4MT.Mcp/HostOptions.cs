@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -12,6 +13,7 @@ internal sealed record HostOptions
     public required string[] GameRoots { get; init; }
     public string Transport { get; init; } = "stdio";
     public string HttpListenUrl { get; init; } = "http://127.0.0.1:8080";
+    public bool AllowPrivateNetworkHttp { get; init; }
     public string? HttpBearerTokenFile { get; init; }
     public string? CacheAdminBearerTokenFile { get; init; }
     public string? GameIndexCacheRoot { get; init; }
@@ -54,8 +56,9 @@ internal sealed record HostOptions
             if (!Uri.TryCreate(HttpListenUrl, UriKind.Absolute, out var listenUri) ||
                 listenUri.Scheme is not ("http" or "https") || listenUri.Port is < 1 or > 65535)
                 throw new ArgumentException("httpListenUrl must be an absolute HTTP or HTTPS URL with a valid port.");
-            if (listenUri.Scheme == "http" && !listenUri.IsLoopback)
-                throw new ArgumentException("Plain HTTP must bind to loopback. Use HTTPS or a TLS reverse proxy for remote access.");
+            if (listenUri.Scheme == "http" && !listenUri.IsLoopback &&
+                (!AllowPrivateNetworkHttp || !IsPrivateNetworkAddress(listenUri)))
+                throw new ArgumentException("Plain HTTP must bind to loopback. For private-network access, set allowPrivateNetworkHttp to true and bind to a specific private IP address.");
             Absolute(HttpBearerTokenFile);
             Absolute(CacheAdminBearerTokenFile);
             Absolute(GameIndexCacheRoot);
@@ -89,6 +92,22 @@ internal sealed record HostOptions
         if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) || path.Contains('\0'))
             throw new McpFailure("invalid_arguments", "Paths must be explicit absolute paths.");
         return Path.GetFullPath(path);
+    }
+
+    private static bool IsPrivateNetworkAddress(Uri uri)
+    {
+        if (uri.HostNameType is not (UriHostNameType.IPv4 or UriHostNameType.IPv6) ||
+            !IPAddress.TryParse(uri.Host, out var address))
+            return false;
+
+        var bytes = address.GetAddressBytes();
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+            return bytes[0] == 10 ||
+                (bytes[0] == 172 && bytes[1] is >= 16 and <= 31) ||
+                (bytes[0] == 192 && bytes[1] == 168);
+
+        return address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 &&
+            (bytes[0] & 0xfe) == 0xfc;
     }
 }
 

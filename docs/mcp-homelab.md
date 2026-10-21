@@ -44,7 +44,18 @@ Configure the HTTP host in `/etc/s4mt/mcp.json`:
 }
 ```
 
-The host defaults to loopback HTTP. Put it behind a reverse proxy that terminates TLS and preserves the `Authorization` header, or configure Kestrel for HTTPS with a certificate. Do not expose plain HTTP beyond loopback. `/mcp` requires the MCP bearer token; `/api/cache/*` requires the separate cache-admin token. Keep authorization headers out of proxy access logs.
+The host defaults to loopback HTTP. For access beyond loopback, use a reverse proxy that terminates TLS and preserves the `Authorization` header, configure Kestrel for HTTPS with a certificate, or explicitly opt in to private-LAN HTTP as described below. `/mcp` requires the MCP bearer token; `/api/cache/*` requires the separate cache-admin token. Keep authorization headers out of proxy access logs.
+
+For direct access from a trusted private LAN, you can opt in to plain HTTP on one specific private IP address. Set `allowPrivateNetworkHttp` to `true` and bind `httpListenUrl` to an RFC1918 IPv4 address or IPv6 ULA address assigned to the server. The host rejects hostnames, wildcard addresses, and public IP addresses for this mode. For example, if the server currently has `192.168.0.129`:
+
+```json
+{
+  "allowPrivateNetworkHttp": true,
+  "httpListenUrl": "http://192.168.0.129:18124"
+}
+```
+
+MCP clients can then connect to `http://krux.local:18124/mcp`. The MCP and cache-admin bearer tokens remain required, but plain HTTP does not encrypt them in transit. Use this only on a trusted LAN; use HTTPS when clients cross an untrusted network. The server's current address is a dynamic DHCP lease, so reserve it in the router if you need the endpoint to survive address changes.
 
 Example systemd unit:
 
@@ -104,6 +115,6 @@ The response reports the SHA-256 transfer digest, game version, index fingerprin
 
 ## Connect an MCP client
 
-Configure the client's Streamable HTTP transport URL as `https://s4mt.home/mcp` and send the MCP token as `Authorization: Bearer <token>` on every request. The host keeps the existing three tools: `s4mt_project_init`, `s4mt_project_validate`, and `s4mt_project_build`. Their absolute path arguments name files on the Linux server. When `gameIndex` is omitted, validation and build use the active local cache; their `_meta` includes the active cache SHA-256, game version, and source fingerprint. An explicit index override must still be inside a configured read or game root.
+Configure the client's Streamable HTTP transport URL as `https://s4mt.home/mcp` when using TLS, or `http://krux.local:18124/mcp` for the private-LAN opt-in above. Send the MCP token as `Authorization: Bearer <token>` on every request. The host keeps the existing three tools: `s4mt_project_init`, `s4mt_project_validate`, and `s4mt_project_build`. Their absolute path arguments name files on the Linux server. When `gameIndex` is omitted, validation and build use the active local cache; their `_meta` includes the active cache SHA-256, game version, and source fingerprint. An explicit index override must still be inside a configured read or game root.
 
 Local stdio configuration remains the default. HTTP mode and its cache settings are opt-in through `transport: "http"`.
