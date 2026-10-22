@@ -29,6 +29,7 @@ internal sealed class CommandOutputLease : IDisposable
 
     internal static CommandOutputLease Acquire(string destination, bool tree, PathPolicy policy, IEnumerable<string> inputs)
     {
+        destination = policy.StandaloneOutput(destination);
         if (tree) policy.CheckTree(destination, write: true);
         var parent = Path.GetDirectoryName(destination)!;
         var canonical = PathGuard.ResolvePath(destination);
@@ -58,7 +59,7 @@ internal sealed class CommandOutputLease : IDisposable
     internal void Publish()
     {
         if (StagedFile is null) return;
-        policy.Write(destination);
+        policy.StandaloneOutput(destination);
         File.Move(StagedFile, destination, overwrite: true);
     }
 

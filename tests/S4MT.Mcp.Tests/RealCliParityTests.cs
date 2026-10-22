@@ -2,12 +2,82 @@ using System.Text;
 using System.Text.Json;
 using ModelContextProtocol.Client;
 using S4MT.Cli;
+using S4MT.Mcp;
 using Xunit;
 
 namespace S4MT.Mcp.Tests;
 
 public sealed class RealCliParityTests
 {
+    [Fact]
+    public async Task ResourceExportCannotResetBlockedOutputReservation()
+    {
+        using var workspace = new TestWorkspace(timeout: 20000);
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent!.Name;
+        var cli = Path.Combine(TestWorkspace.RepositoryRoot, "src", "S4MT.Cli", "bin", configuration, "net10.0", "s4mt.dll");
+        workspace.SaveConfig(workspace.Options with { CliPath = cli });
+        var policy = new PathPolicy(workspace.Options);
+        var blockedOutput = Path.Combine(workspace.Root, "blocked.bin");
+        using (var lease = CommandOutputLease.Acquire(blockedOutput, false, policy, [])) lease.BlockRecovery();
+        var lockPath = Directory.GetFiles(workspace.Root, ".s4mt-mcp-*.lock").Single();
+        var blockedState = File.ReadAllText(lockPath);
+        var payload = Path.Combine(workspace.Root, "ready.bin");
+        File.WriteAllText(payload, "S4MT.Mcp output lease v1\n");
+        var manifest = Path.Combine(workspace.Root, "manifest.json");
+        File.WriteAllText(manifest, JsonSerializer.Serialize(new { format = 1, resources = new[] { new { type = "0xE882D22F", group = "0", instance = "1", source = payload, encoding = "bytes" } } }));
+        await using var client = await McpClient.CreateAsync(new StdioClientTransport(new StdioClientTransportOptions
+        {
+            Command = workspace.Dotnet, Arguments = [workspace.Host, "--config", workspace.Configuration]
+        }));
+        var package = Path.Combine(workspace.Root, "source.package");
+        var build = await client.CallToolAsync("s4mt_build", new Dictionary<string, object?> { ["manifest"] = manifest, ["output"] = package });
+        Assert.False(build.IsError == true, JsonSerializer.Serialize(build));
+        var export = await client.CallToolAsync("s4mt_resource_export", new Dictionary<string, object?>
+        {
+            ["package"] = package, ["tgi"] = "0xE882D22F:0x00000000:0x0000000000000001", ["output"] = lockPath
+        });
+        Assert.True(export.IsError);
+        Assert.Equal("reserved_output_path", export.StructuredContent!.Value.GetProperty("error").GetProperty("code").GetString());
+        Assert.Equal(blockedState, File.ReadAllText(lockPath));
+        Assert.Equal("cleanup_failed", Assert.Throws<McpFailure>(() => CommandOutputLease.Acquire(blockedOutput, false, policy, [])).Code);
+    }
+
+    [Fact]
+    public async Task DisjointRootsSupportFilePublicationAndIndexReuse()
+    {
+        using var workspace = new TestWorkspace(timeout: 20000, outputLimit: 1048576);
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent!.Name;
+        var cli = Path.Combine(TestWorkspace.RepositoryRoot, "src", "S4MT.Cli", "bin", configuration, "net10.0", "s4mt.dll");
+        var read = Path.Combine(workspace.Root, "read");
+        var write = Path.Combine(workspace.Root, "write");
+        var game = Path.Combine(read, "game");
+        Directory.CreateDirectory(read);
+        Directory.CreateDirectory(write);
+        Directory.CreateDirectory(Path.Combine(game, "Data", "Client"));
+        var json = Path.Combine(read, "strings.json");
+        File.WriteAllText(json, JsonSerializer.Serialize(new { format = 1, tgi = "0x220557DA:0x00000000:0x0000000000000001", entries = new[] { new { key = "0x12345678", text = "Hello" } } }));
+        workspace.SaveConfig(workspace.Options with { CliPath = cli, ReadRoots = [read], WriteRoots = [write], GameRoots = [game] });
+        await using var client = await McpClient.CreateAsync(new StdioClientTransport(new StdioClientTransportOptions
+        {
+            Command = workspace.Dotnet, Arguments = [workspace.Host, "--config", workspace.Configuration]
+        }));
+        var package = Path.Combine(write, "strings.package");
+        var built = await client.CallToolAsync("s4mt_stbl_build", new Dictionary<string, object?> { ["json"] = json, ["output"] = package });
+        Assert.False(built.IsError == true, JsonSerializer.Serialize(built));
+        Assert.True(File.Exists(package));
+        File.Copy(package, Path.Combine(game, "Data", "Client", "ClientFullBuild0.package"));
+        var args = new Dictionary<string, object?> { ["gameRoot"] = game, ["output"] = Path.Combine(write, "index.jsonl.gz") };
+        var indexed = await client.CallToolAsync("s4mt_game_index", args);
+        Assert.False(indexed.IsError == true, JsonSerializer.Serialize(indexed));
+        var reused = await client.CallToolAsync("s4mt_game_index", args);
+        Assert.False(reused.IsError == true, JsonSerializer.Serialize(reused));
+        Assert.True(reused.StructuredContent!.Value.GetProperty("reused").GetBoolean());
+        Assert.Empty(Directory.GetDirectories(write, ".s4mt-mcp-stage-*"));
+        var denied = await client.CallToolAsync("s4mt_inspect", new Dictionary<string, object?> { ["package"] = package });
+        Assert.True(denied.IsError);
+        Assert.Equal("path_outside_root", denied.StructuredContent!.Value.GetProperty("error").GetProperty("code").GetString());
+    }
+
     [Fact]
     public async Task All32ToolsRunRealCliWithGeneratedFixturesAndReadback()
     {

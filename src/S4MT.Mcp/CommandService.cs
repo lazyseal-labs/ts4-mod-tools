@@ -32,7 +32,7 @@ internal sealed class CommandService(PathPolicy paths, CliProcessRunner runner, 
                 if (!values.TryGetValue(option.Flag, out var value)) continue;
                 if (option.Role is OptionRole.Output or OptionRole.OutputTree)
                 {
-                    value = paths.Write(value);
+                    value = paths.StandaloneOutput(value);
                     outputs.Add((option.Flag, value, option.Role == OptionRole.OutputTree));
                 }
                 else if (option.Role is not (OptionRole.Text or OptionRole.Int))
@@ -45,7 +45,6 @@ internal sealed class CommandService(PathPolicy paths, CliProcessRunner runner, 
             foreach (var output in outputs) paths.NoCollision(output.Path, inputs);
             if (outputs.Count == 0) return await Invoke(values, token);
             var destination = outputs.Single();
-            if (descriptor.Command == "game.index" && File.Exists(destination.Path)) paths.Read(destination.Path);
             using var lease = CommandOutputLease.Acquire(destination.Path, destination.Tree, paths, inputs);
             if (!destination.Tree)
             {

@@ -14,7 +14,7 @@ internal sealed class ProjectTools(
         string name,
         CancellationToken cancellationToken) => Execute(async token =>
     {
-        var project = paths.Write(path);
+        var project = paths.Output(path);
         if (string.IsNullOrWhiteSpace(name) || name.Length > 64 || !char.IsAsciiLetterOrDigit(name[0]) ||
             name.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not '.' and not '_' and not '-'))
             throw new McpFailure("invalid_arguments", "Use a package-safe project name with 1 to 64 characters. Directory paths may contain spaces.");
@@ -48,7 +48,7 @@ internal sealed class ProjectTools(
         return Execute(async token =>
         {
             var input = paths.Read(project);
-            var output = paths.Write(outputRoot);
+            var output = paths.Output(outputRoot);
             var inputs = paths.ProjectInputs(input);
             var arguments = new List<string> { "project", "build", "--project", input, "--output-root", output };
             var selectedGameIndex = SelectGameIndex(gameIndex, out usedCache);

@@ -9,6 +9,84 @@ namespace S4MT.Mcp.Tests;
 public sealed class CommandSafetyTests
 {
     [Fact]
+    public void StandaloneOutputsCannotEnterManagedProjectBuildTrees()
+    {
+        using var workspace = new TestWorkspace();
+        var policy = new PathPolicy(workspace.Options);
+        var root = Path.Combine(workspace.Root, "builds");
+        using (BuildOutputLease.Acquire(root, policy))
+        {
+            Assert.Equal("output_in_project_build", Assert.Throws<McpFailure>(() => policy.StandaloneOutput(root)).Code);
+            var output = Path.Combine(root, "published", "other.package");
+            Assert.Equal("output_in_project_build", Assert.Throws<McpFailure>(() => CommandOutputLease.Acquire(output, false, policy, [])).Code);
+            Assert.False(Directory.Exists(Path.GetDirectoryName(output)));
+        }
+        Assert.Equal("output_in_project_build", Assert.Throws<McpFailure>(() => policy.StandaloneOutput(Path.Combine(root, "other.package"))).Code);
+    }
+
+    [Theory]
+    [InlineData(".s4mt-mcp-owner.json")]
+    [InlineData(".s4mt-mcp.lock")]
+    [InlineData(".s4mt-mcp-lease.lock")]
+    [InlineData(".s4mt-mcp-stage-owned/payload.bin")]
+    [InlineData(".s4mt-stage-owned/payload.bin")]
+    public void CallerOutputsCannotTargetInternalState(string relative)
+    {
+        using var workspace = new TestWorkspace();
+        var policy = new PathPolicy(workspace.Options);
+        Assert.Equal("reserved_output_path", Assert.Throws<McpFailure>(() => policy.Output(Path.Combine(workspace.Root, relative))).Code);
+    }
+
+    [Fact]
+    public void MissingTreeOutputUnderLinkedParentCannotEscapeWriteRoot()
+    {
+        using var workspace = new TestWorkspace();
+        using var outside = new TestWorkspace();
+        var write = Path.Combine(workspace.Root, "write");
+        Directory.CreateDirectory(write);
+        var link = Path.Combine(write, "linked");
+        workspace.DirectoryLink(link, outside.Root);
+        var policy = new PathPolicy(workspace.Options with { WriteRoots = [write] });
+        var output = Path.Combine(link, "new-bundle");
+        Assert.Equal("path_outside_root", Assert.Throws<McpFailure>(() => policy.CheckTree(output, write: true)).Code);
+        Assert.Equal("path_outside_root", Assert.Throws<McpFailure>(() => CommandOutputLease.Acquire(output, true, policy, [])).Code);
+        Assert.False(Directory.Exists(Path.Combine(outside.Root, "new-bundle")));
+    }
+
+    [Fact]
+    public void WriteOnlyStagingIsCleanedWithoutGrantingInputReadAccess()
+    {
+        using var workspace = new TestWorkspace();
+        var read = Path.Combine(workspace.Root, "read");
+        var write = Path.Combine(workspace.Root, "write");
+        Directory.CreateDirectory(read);
+        Directory.CreateDirectory(write);
+        var policy = new PathPolicy(workspace.Options with { ReadRoots = [read], WriteRoots = [write] });
+        var output = Path.Combine(write, "result.bin");
+        using (var lease = CommandOutputLease.Acquire(output, false, policy, []))
+        {
+            File.WriteAllText(lease.StagedFile!, "result");
+            lease.Publish();
+        }
+        Assert.Equal("result", File.ReadAllText(output));
+        Assert.Empty(Directory.GetDirectories(write, ".s4mt-mcp-stage-*"));
+        Assert.Equal("path_outside_root", Assert.Throws<McpFailure>(() => policy.Read(output)).Code);
+    }
+
+    [Fact]
+    public void TrailingSeparatorUsesSameBundleLockWithoutCreatingDestination()
+    {
+        using var workspace = new TestWorkspace();
+        var policy = new PathPolicy(workspace.Options);
+        var output = Path.Combine(workspace.Root, "bundle");
+        using var lease = CommandOutputLease.Acquire(output + Path.DirectorySeparatorChar, true, policy, []);
+        Assert.False(Directory.Exists(output));
+        Assert.Equal("output_busy", Assert.Throws<McpFailure>(() => CommandOutputLease.Acquire(output, true, policy, [])).Code);
+        var root = Path.GetPathRoot(workspace.Root)!;
+        Assert.Equal(root, HostOptions.Absolute(root));
+    }
+
+    [Fact]
     public void CatalogCoversEveryCliReportAndRejectsUnlistedOptions()
     {
         var source = File.ReadAllText(Path.Combine(TestWorkspace.RepositoryRoot, "src", "S4MT.Cli", "S4mtCli.cs"));

@@ -1,6 +1,6 @@
 # MCP tools
 
-Both stdio and HTTP expose all 32 operational CLI commands. Tool names use `s4mt_` followed by the CLI words separated by underscores. Help and version remain CLI-only. All parameters are strings except `limit`, `mip`, and `row`, which are JSON integers. A trailing `?` below means optional. Optional values use the CLI default when omitted.
+Both stdio and HTTP expose all 32 operational CLI commands. Tool names use `s4mt_` followed by the CLI words separated by underscores. Help and version remain CLI-only. All parameters are strings except `limit`, `mip`, and `row`, which are JSON integers. A trailing `?` below means optional. Optional values use the CLI default when omitted, except that project `gameIndex` uses the active server cache when configured.
 
 | Tool | Parameters |
 | --- | --- |
@@ -64,6 +64,10 @@ Direct path arguments must be absolute paths on the server. Read paths must reso
 Standalone build and verify manifests may use absolute resource sources or paths relative to the manifest. Merge manifests may also use either form. Every source must resolve inside a configured read root or game root. Project paths retain the CLI's stricter containment rules. Game, TDesc, schema, and RLES trees are checked before execution, including linked descendants. The host limits checked trees to 20,000 entries and JSON path metadata to 1 MiB.
 
 File outputs replace existing files only after a successful CLI report. The host stages each file in a private sibling directory and reserves its destination with a persistent `.s4mt-mcp-*.lock` file. Calls targeting the same destination return `output_busy` while a writer holds the reservation. Lock files stay in place between calls. Do not delete them while the host is running. Unknown files and unrelated staging directories are preserved.
+
+Caller-selected output paths cannot contain components starting with `.s4mt-mcp` or `.s4mt-stage-`. These names are reserved for locks, ownership markers, and staging. The check includes resolved link targets.
+
+Standalone file and bundle outputs cannot write inside a managed project build root. Use a destination outside that root.
 
 RLES bundle exports require a new directory. TDesc refresh reuses an existing snapshot only when the CLI verifies identical data. Project builds retain their dedicated output root, ownership marker, child identity journal, and cleanup recovery rules. A `cleanup_failed` reservation blocks reuse and preserves staging data for inspection. Use a new output path until the earlier process cleanup has been checked. Abrupt host termination can leave private file staging directories, which are not automatically treated as owned by a later invocation.
 
