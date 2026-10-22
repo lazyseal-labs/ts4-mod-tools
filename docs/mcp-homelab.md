@@ -117,4 +117,40 @@ The response reports the SHA-256 transfer digest, game version, index fingerprin
 
 Configure the client's Streamable HTTP transport URL as `https://s4mt.home/mcp` when using TLS, or `http://krux.local:18124/mcp` for the private-LAN opt-in above. Send the MCP token as `Authorization: Bearer <token>` on every request. The host keeps the existing three tools: `s4mt_project_init`, `s4mt_project_validate`, and `s4mt_project_build`. Their absolute path arguments name files on the Linux server. When `gameIndex` is omitted, validation and build use the active local cache; their `_meta` includes the active cache SHA-256, game version, and source fingerprint. An explicit index override must still be inside a configured read or game root.
 
+For Codex and Antigravity, add these project files to the repository. Neither file contains the token.
+
+`.codex/config.toml`:
+
+```toml
+[mcp_servers.s4mt-krux]
+url = "http://krux.local:18124/mcp"
+bearer_token_env_var = "S4MT_MCP_TOKEN"
+```
+
+`.agents/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "s4mt-krux": {
+      "serverUrl": "http://krux.local:18124/mcp",
+      "headers": {
+        "Authorization": "Bearer ${S4MT_MCP_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Set `S4MT_MCP_TOKEN` in the Windows user environment from your local MCP token file, then restart Codex and Antigravity so they inherit it:
+
+```powershell
+$tokenPath = Join-Path $env:LOCALAPPDATA 'S4MT\mcp.token'
+$token = (Get-Content -Raw -LiteralPath $tokenPath).Trim()
+[Environment]::SetEnvironmentVariable('S4MT_MCP_TOKEN', $token, 'User')
+Remove-Variable token
+```
+
+Codex loads `.codex/config.toml` after you trust the project. Restart Antigravity to load `.agents/mcp_config.json`. MCP tool paths still refer to Linux paths on Krux, under its configured project and build roots.
+
 Local stdio configuration remains the default. HTTP mode and its cache settings are opt-in through `transport: "http"`.

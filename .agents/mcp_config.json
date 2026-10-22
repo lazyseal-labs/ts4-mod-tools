@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "s4mt-krux": {
+      "serverUrl": "http://krux.local:18124/mcp",
+      "headers": {
+        "Authorization": "Bearer ${S4MT_MCP_TOKEN}"
+      }
+    }
+  }
+}
