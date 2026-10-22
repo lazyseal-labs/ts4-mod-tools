@@ -1,3 +1,0 @@
-[mcp_servers.s4mt-krux]
-url = "http://krux.local:18124/mcp"
-bearer_token_env_var = "S4MT_MCP_TOKEN"
