@@ -9,6 +9,14 @@ import threading
 import time
 
 
+COMMANDS = """build inspect verify package.merge resource.export resource.import
+project.init project.validate project.build game.index game.query game.find
+tdesc.refresh tdesc.inspect stbl.build stbl.export stbl.import casp.inspect casp.rename
+tuning.extract tuning.build tuning.validate tuning.export tuning.import
+simdata.inspect simdata.roundtrip simdata.set image.export image.build image.import
+conflict.game conflict.packages""".split()
+
+
 class StdioClient:
     def __init__(self, host, config):
         self.messages = queue.Queue()
@@ -69,7 +77,7 @@ class StdioClient:
         self.send({'jsonrpc': '2.0', 'method': 'notifications/initialized'})
         tools = self.request('tools/list', {})
         names = sorted(tool['name'] for tool in tools['result']['tools'])
-        assert names == ['s4mt_project_build', 's4mt_project_init', 's4mt_project_validate'], names
+        assert names == sorted('s4mt_' + command.replace('.', '_') for command in COMMANDS), names
         return result, tools
 
     def call(self, name, arguments):

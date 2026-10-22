@@ -79,6 +79,35 @@ namespace S4MT.Mcp
             return inputs;
         }
 
+        internal IReadOnlyList<string> CommandInputs(string path, OptionRole role)
+        {
+            var inputs = new List<string> { Read(path) };
+            if (role == OptionRole.Project) return ProjectInputs(path);
+            if (role is OptionRole.Tree or OptionRole.Bundle)
+            {
+                CheckTree(path, write: false, inputs);
+                return inputs;
+            }
+            if (role is not (OptionRole.Manifest or OptionRole.MergeManifest)) return inputs;
+            var document = ReadObject(path);
+            if (document is null) return inputs;
+            var root = Path.GetDirectoryName(path)!;
+            if (role == OptionRole.Manifest && Property(document.Value, "resources") is { ValueKind: JsonValueKind.Array } resources)
+                foreach (var resource in resources.EnumerateArray())
+                    if (String(resource, "source") is { } source) Add(source);
+            if (role == OptionRole.MergeManifest && Property(document.Value, "packages") is { ValueKind: JsonValueKind.Array } packages)
+                foreach (var package in packages.EnumerateArray())
+                    if (package.ValueKind == JsonValueKind.String) Add(package.GetString()!);
+            return inputs;
+
+            void Add(string declaration)
+            {
+                var full = Path.IsPathFullyQualified(declaration) ? Path.GetFullPath(declaration) : Path.GetFullPath(Path.Combine(root, declaration));
+                inputs.Add(Read(full));
+                if (inputs.Count > MaximumFiles) throw new McpFailure("input_limit", "Manifest has too many sources.");
+            }
+        }
+
         internal void CheckTree(string root, bool write, List<string>? files = null)
         {
             var pending = new Stack<string>();
@@ -100,9 +129,10 @@ namespace S4MT.Mcp
         {
             foreach (var input in inputs.Append(options.CliPath))
             {
-                PathGuard.EnsureDoesNotOverwrite(outputRoot, (input, "input"));
-                if (Within(input, outputRoot))
-                    throw new McpFailure("path_collision", "Build output root must not contain a project input or the CLI.");
+                try { PathGuard.EnsureDoesNotOverwrite(outputRoot, (input, "input")); }
+                catch (CliInputException exception) { throw new McpFailure("path_collision", exception.Message); }
+                if (Within(input, outputRoot) || Directory.Exists(input) && Within(outputRoot, input))
+                    throw new McpFailure("path_collision", "Output must not contain an input or the CLI, or be inside an input tree.");
             }
         }
 

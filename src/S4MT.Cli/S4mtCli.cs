@@ -38,6 +38,7 @@ internal static class S4mtCli
                 return 0;
             }
 
+            CommandCatalog.ValidateInvocation(args);
             return args[0] switch
             {
                 "build" => await BuildAsync(args[1..], cancellationToken),

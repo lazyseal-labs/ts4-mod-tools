@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Server;
+using S4MT.Cli;
 using S4MT.Mcp;
 
 if (args.Length != 2 || args[0] != "--config")
@@ -33,9 +34,11 @@ try
         webBuilder.Services.AddSingleton(paths);
         webBuilder.Services.AddSingleton(runner);
         webBuilder.Services.AddSingleton(cache);
+        webBuilder.Services.AddSingleton<CommandService>();
+        webBuilder.Services.AddSingleton<ProjectTools>();
         webBuilder.Services.AddMcpServer()
             .WithHttpTransport(transport => transport.SessionMode = HttpServerSessionMode.Stateless)
-            .WithTools<ProjectTools>();
+            .WithTools(CommandCatalog.All.Select(command => new CommandTool(command)));
 
         var app = webBuilder.Build();
         app.UseMiddleware<BearerTokenMiddleware>();
@@ -50,7 +53,16 @@ try
     builder.Services.AddSingleton(options);
     builder.Services.AddSingleton(new PathPolicy(options));
     builder.Services.AddSingleton<CliProcessRunner>();
-    builder.Services.AddMcpServer().WithStdioServerTransport().WithTools<ProjectTools>();
+    builder.Services.AddSingleton<CommandService>();
+    builder.Services.AddSingleton<ProjectTools>();
+    if (options.GameIndexCacheRoot is not null)
+    {
+        var cache = new GameIndexStore(options);
+        await cache.InitializeAsync(new CliProcessRunner(options), CancellationToken.None);
+        builder.Services.AddSingleton(cache);
+    }
+    builder.Services.AddMcpServer().WithStdioServerTransport()
+        .WithTools(CommandCatalog.All.Select(command => new CommandTool(command)));
     await builder.Build().RunAsync();
     return 0;
 }

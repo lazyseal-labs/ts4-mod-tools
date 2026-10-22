@@ -9,6 +9,7 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="ModelContextProtocol" Version="2.2.0" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
+    <Compile Include="../S4MT.Cli/CommandCatalog.cs" Link="CliCommandCatalog.cs" />
     <Compile Include="../S4MT.Cli/PathGuard.cs" Link="CliPathGuard.cs" />
     <InternalsVisibleTo Include="S4MT.Mcp.Tests" />
   </ItemGroup>

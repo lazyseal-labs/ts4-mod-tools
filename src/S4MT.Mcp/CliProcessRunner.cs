@@ -158,25 +158,12 @@ internal sealed class CliProcessRunner
                 !report.TryGetProperty("command", out var reportedCommand) || reportedCommand.GetString() != command)
                 throw new JsonException("Missing schemaVersion or unexpected report command.");
             var invalid = report.TryGetProperty("valid", out var valid) && valid.ValueKind == JsonValueKind.False;
-            if (command == "project.init")
-                Require(report, ("projectFile", JsonValueKind.String), ("packageManifest", JsonValueKind.String), ("created", null));
-            else if (command == "game.find")
-                Require(report,
-                    ("index", JsonValueKind.String), ("type", JsonValueKind.String), ("matchCount", JsonValueKind.Number),
-                    ("resources", JsonValueKind.Array), ("gameVersion", JsonValueKind.String),
-                    ("fingerprint", JsonValueKind.String), ("packageCount", JsonValueKind.Number),
-                    ("resourceCount", JsonValueKind.Number), ("generatedUtc", JsonValueKind.String));
-            else
-            {
-                Require(report, ("diagnostics", JsonValueKind.Array), ("resourceCount", JsonValueKind.Number), ("scriptArchiveCount", JsonValueKind.Number));
-                if (command == "project.validate" || invalid) Require(report, ("projectRoot", JsonValueKind.String));
-                else Require(report, ("outputDirectory", JsonValueKind.String), ("fingerprint", JsonValueKind.String), ("reused", null));
-            }
-            if (exitCode == 1 && invalid && command is "project.validate" or "project.build")
+            S4MT.Cli.CommandCatalog.ValidateReport(command, report);
+            if (exitCode == 1 && invalid && S4MT.Cli.CommandCatalog.Get(command).AllowsInvalid)
                 return new CliReport(report.Clone(), exitCode, stderr);
             if (exitCode != 0)
                 throw new McpFailure("cli_error", "CLI returned an unsuccessful exit code.", exitCode, stderr);
-            if (command is not ("project.init" or "game.find") &&
+            if (S4MT.Cli.CommandCatalog.Get(command).AllowsInvalid &&
                 (!report.TryGetProperty("valid", out valid) || valid.ValueKind != JsonValueKind.True))
                 throw new JsonException("Successful validation/build must report valid:true.");
             return new CliReport(report.Clone(), exitCode, stderr);
@@ -185,13 +172,5 @@ internal sealed class CliProcessRunner
         {
             throw new McpFailure("malformed_cli_output", $"CLI stdout was not the expected JSON report: {exception.Message}", exitCode, stderr);
         }
-    }
-
-    private static void Require(JsonElement report, params (string Name, JsonValueKind? Kind)[] fields)
-    {
-        foreach (var (name, kind) in fields)
-            if (!report.TryGetProperty(name, out var value) ||
-                (kind is { } expected ? value.ValueKind != expected : value.ValueKind is not (JsonValueKind.True or JsonValueKind.False)))
-                throw new JsonException($"Missing or invalid report field '{name}'.");
     }
 }

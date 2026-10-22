@@ -16,12 +16,12 @@ public sealed class StdioTests
     }));
 
     [WindowsFact]
-    public async Task OfficialClientDiscoversExactlyThreeTypedToolsAndRejectsMalformedArguments()
+    public async Task OfficialClientDiscoversAllTypedToolsAndRejectsMalformedArguments()
     {
         using var workspace = new TestWorkspace();
         await using var client = await Connect(workspace);
         var tools = await client.ListToolsAsync();
-        Assert.Equal(new[] { "s4mt_project_build", "s4mt_project_init", "s4mt_project_validate" }, tools.Select(tool => tool.Name).Order());
+        Assert.Equal(S4MT.Cli.CommandCatalog.All.Select(command => command.ToolName).Order(), tools.Select(tool => tool.Name).Order());
         var validate = tools.Single(tool => tool.Name == "s4mt_project_validate");
         Assert.Equal("string", validate.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("project").GetProperty("type").GetString());
         var invalid = await client.CallToolAsync("s4mt_project_validate", new Dictionary<string, object?>());
@@ -41,7 +41,7 @@ public sealed class StdioTests
         var result = await client.CallToolAsync("s4mt_project_validate", new Dictionary<string, object?> { ["project"] = workspace.Project() });
         Assert.True(result.IsError);
         Assert.Equal("cli_unavailable", result.StructuredContent!.Value.GetProperty("error").GetProperty("code").GetString());
-        Assert.Equal(3, (await client.ListToolsAsync()).Count);
+        Assert.Equal(32, (await client.ListToolsAsync()).Count);
     }
 
     [UnsupportedPlatformFact]
@@ -49,7 +49,7 @@ public sealed class StdioTests
     {
         using var workspace = new TestWorkspace();
         await using var client = await Connect(workspace);
-        Assert.Equal(3, (await client.ListToolsAsync()).Count);
+        Assert.Equal(32, (await client.ListToolsAsync()).Count);
         var result = await client.CallToolAsync("s4mt_project_validate", new Dictionary<string, object?>
         {
             ["project"] = workspace.Project()

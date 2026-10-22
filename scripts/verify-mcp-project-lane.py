@@ -100,7 +100,7 @@ def main():
 
     try:
         initialize, tools = client.initialize()
-        checks.append('PASS initialize and discovery of exactly three project tools')
+        checks.append('PASS initialize and discovery of all 32 CLI tools')
         if args.lane == 1:
             baseline = direct(['project', 'validate', '--project', str(project)])
             cli_build = direct(['project', 'build', '--project', str(project), '--output-root', str(root / 'cli-builds')])

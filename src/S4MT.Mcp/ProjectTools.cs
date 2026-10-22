@@ -1,24 +1,17 @@
-using System.ComponentModel;
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using Microsoft.Extensions.Hosting;
 using ModelContextProtocol.Protocol;
-using ModelContextProtocol.Server;
 
 namespace S4MT.Mcp;
 
-[McpServerToolType]
 internal sealed class ProjectTools(
     PathPolicy paths,
     CliProcessRunner runner,
     IHostApplicationLifetime lifetime,
     GameIndexStore? gameIndexStore = null)
 {
-    [McpServerTool(Name = "s4mt_project_init", Destructive = false)]
-    [Description("Create or repair an S4MT project scaffold in an explicit writable directory. Existing project names must match. Does not install or launch anything.")]
     public Task<CallToolResult> Init(
-        [Description("Absolute project directory under a configured write root. Spaces in directory paths are supported.")] string path,
-        [Description("Package identifier, 1 to 64 ASCII letters, digits, dots, underscores or hyphens. First character must be a letter or digit.")] string name,
+        string path,
+        string name,
         CancellationToken cancellationToken) => Execute(async token =>
     {
         var project = paths.Write(path);
@@ -29,12 +22,10 @@ internal sealed class ProjectTools(
         return await runner.RunAsync(["project", "init", "--path", project, "--name", name], "project.init", token);
     }, cancellationToken);
 
-    [McpServerTool(Name = "s4mt_project_validate", ReadOnly = true, Destructive = false, Idempotent = true)]
-    [Description("Validate an S4MT project directory or explicit project JSON file. Returns CLI diagnostics, warnings and partial validation coverage unchanged. An invalid project is a structured valid:false report.")]
     public Task<CallToolResult> Validate(
-        [Description("Absolute project directory or project JSON file under configured read roots.")] string project,
+        string project,
         CancellationToken cancellationToken,
-        [Description("Optional absolute read-only game index file under configured read or game roots. If omitted, the server's active game cache is used when configured.")] string? gameIndex = null)
+        string? gameIndex = null)
     {
         GameIndexArtifact? usedCache = null;
         return Execute(async token =>
@@ -47,13 +38,11 @@ internal sealed class ProjectTools(
         }, cancellationToken, () => usedCache);
     }
 
-    [McpServerTool(Name = "s4mt_project_build", Destructive = false, Idempotent = true)]
-    [Description("Build and read back an S4MT package and script bundle. Requires an empty or MCP-owned dedicated output root. Repeated builds reuse verified fingerprints. Package verification does not prove in-game behavior.")]
     public Task<CallToolResult> Build(
-        [Description("Absolute project directory or project JSON file under configured read roots.")] string project,
-        [Description("Absolute dedicated build directory under a write root. Must be empty on first use. Game roots are read-only.")] string outputRoot,
+        string project,
+        string outputRoot,
         CancellationToken cancellationToken,
-        [Description("Optional absolute read-only game index file. If omitted, the server's active game cache is used when configured.")] string? gameIndex = null)
+        string? gameIndex = null)
     {
         GameIndexArtifact? usedCache = null;
         return Execute(async token =>
@@ -96,53 +85,9 @@ internal sealed class ProjectTools(
         arguments.Add(index);
     }
 
-    private async Task<CallToolResult> Execute(
+    private Task<CallToolResult> Execute(
         Func<CancellationToken, Task<CliReport>> operation,
         CancellationToken cancellationToken,
-        Func<GameIndexArtifact?>? gameIndexProvenance = null)
-    {
-        try
-        {
-            CliProcessRunner.EnsureSupportedPlatform(OperatingSystem.IsWindows(), OperatingSystem.IsLinux());
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.ApplicationStopping);
-            linked.Token.ThrowIfCancellationRequested();
-            var result = await operation(linked.Token);
-            var report = result.Report;
-            var command = report.GetProperty("command").GetString();
-            var status = report.TryGetProperty("valid", out var valid) && valid.ValueKind == JsonValueKind.False ? "invalid" : "completed";
-            var diagnostics = report.TryGetProperty("diagnostics", out var items) && items.ValueKind == JsonValueKind.Array ? items.GetArrayLength() : 0;
-            var summary = $"{command} {status}. {diagnostics} diagnostics. CLI exit {result.ExitCode}.";
-            if (!string.IsNullOrEmpty(result.Stderr)) summary += " CLI stderr is available in _meta.cliStderr.";
-            var metadata = new JsonObject { ["cliExitCode"] = result.ExitCode, ["cliStderr"] = result.Stderr };
-            if (gameIndexProvenance?.Invoke() is { } artifact)
-            {
-                metadata["gameIndexSha256"] = artifact.Sha256;
-                metadata["gameIndexGameVersion"] = artifact.GameVersion;
-                metadata["gameIndexFingerprint"] = artifact.Fingerprint;
-            }
-            return new CallToolResult
-            {
-                StructuredContent = report,
-                Content = [new TextContentBlock { Text = summary }],
-                Meta = metadata
-            };
-        }
-        catch (OperationCanceledException)
-        {
-            return Error(new McpFailure("cancelled", "Invocation cancelled before the CLI started."));
-        }
-        catch (McpFailure exception) { return Error(exception); }
-        catch (S4MT.Cli.CliInputException exception) { return Error(new McpFailure("unsafe_project_path", exception.Message)); }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or JsonException)
-        {
-            return Error(new McpFailure("file_access_error", exception.Message));
-        }
-    }
-
-    private static CallToolResult Error(McpFailure failure) => new()
-    {
-        IsError = true,
-        StructuredContent = JsonSerializer.SerializeToElement(new { error = new { code = failure.Code, message = failure.Message, exitCode = failure.ExitCode, stderr = failure.Stderr } }),
-        Content = [new TextContentBlock { Text = $"{failure.Code}: {failure.Message}" }]
-    };
+        Func<GameIndexArtifact?>? gameIndexProvenance = null) =>
+        ToolResult.Execute(lifetime, operation, cancellationToken, gameIndexProvenance);
 }
