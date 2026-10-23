@@ -186,3 +186,9 @@ See [docs/resource-codecs.md](docs/resource-codecs.md) for the verified capabili
 ## Verification scripts
 
 Run the package build/merge, path-collision, project, game-index, STBL, tuning, SimData, DST/PNGImage/translucent-JPEG image, raw-resource, and conflict workflows with the scripts under `scripts/`. `pwsh -NoProfile -File scripts/verify-tuning-shared-index.ps1` checks a real CombinedTuning XML fixture, malformed indexes, direct build/import rejection, project diagnostics, and opaque binary handling. The resource-specific scripts use fixtures from the installed Sims 4 version and keep generated files under the system temporary directory.
+
+## MCP access
+
+The MCP host exposes all 32 operational CLI commands over stdio or HTTP. Use `s4mt_inspect` to list resources in a `.package` file. Typed tools also cover resource editing, project builds, game indexes, TDesc snapshots, string tables, CASP, tuning, SimData, images, and conflicts.
+
+See the [full MCP tool inventory and parameters](docs/mcp-tools.md), [local stdio setup](docs/mcp-local-launch.md), and [Linux HTTP setup](docs/mcp-homelab.md). Rebuild and restart an existing host, then refresh the client inventory to discover the added tools.

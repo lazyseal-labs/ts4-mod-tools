@@ -1,4 +1,4 @@
-# Run the project tools over stdio
+# Run the MCP tools over stdio
 
 Build the solution with .NET 10.
 
@@ -33,15 +33,15 @@ Use the built DLL directly. `dotnet run` can add build output to protocol stdout
 
 Contained CLI execution is supported on Windows and Linux. On Linux, the host requires `setsid` from util-linux and isolates each CLI call in a process group; run it under a service manager that kills the service cgroup when the host stops. Other platforms return `cli_unavailable` before inspecting project paths or recovering a build output root. When `cliPath` names a DLL on Windows, `dotnetPath` must include the `.exe` extension.
 
-The host discovers exactly three tools.
+The host discovers all 32 operational CLI tools, including `s4mt_inspect` for `.package` files. See the [full tool inventory and parameter reference](mcp-tools.md). The project parameters remain compatible.
 
 - `s4mt_project_init` takes `path` and `name`. Directory paths can contain spaces. The package name must start with an ASCII letter or digit and contain only ASCII letters, digits, dots, underscores, or hyphens. Its maximum length is 64.
 - `s4mt_project_validate` takes `project` and an optional `gameIndex`. A project can be a directory or an explicit project document filename.
 - `s4mt_project_build` takes `project`, `outputRoot`, and an optional `gameIndex`. Use an empty directory dedicated to MCP build output on first use. Later calls require the ownership marker. Builds sharing that root hold an exclusive lock.
 
-All tool paths are explicit and absolute. Indirect manifests, resource sources, scripts, and schema snapshots must remain inside their CLI containment boundaries and configured read roots. Symbolic links and junctions receive the same resolved-path checks as the CLI. Existing output descendants also receive checks before reuse. Game roots and the active Mods directory are read-only. Keep authoring and output directories separate from game installation and user data.
+All tool paths are explicit and absolute. Standalone manifest sources and merge inputs may be absolute or relative to their manifest, within configured read or game roots. Project manifests, sources, scripts, and schemas retain their CLI containment boundaries. Symbolic links and junctions receive the same resolved-path checks as the CLI. Existing output descendants also receive checks before reuse. Game roots and the active Mods directory are read-only. Keep authoring and output directories separate from game installation and user data.
 
-Results contain the full CLI JSON in `structuredContent` and a short text summary. `_meta.cliExitCode` and `_meta.cliStderr` retain process details. Unknown report fields, diagnostics, warnings, and schema versions survive unchanged. Exit 1 with `valid:false` is a normal validation or build report. Verification describes package bytes and supported validators. It does not prove game behavior.
+Results contain the full CLI JSON in `structuredContent` and a short text summary. `_meta.cliExitCode` and `_meta.cliStderr` retain process details. Unknown report fields, diagnostics, warnings, and schema versions survive unchanged. Exit 1 with `valid:false` is a normal report for verify, tuning validation, project validation, and project build. Verification describes package bytes and supported validators. It does not prove game behavior.
 
 Stable tool error codes include `invalid_arguments`, `path_outside_root`, `read_only_root`, `unsafe_project_path`, `path_collision`, `input_limit`, `output_not_owned`, `output_busy`, `cli_unavailable`, `cli_error`, `malformed_cli_output`, `output_limit`, `timeout`, `cancelled`, `cli_io_error`, `cleanup_failed`, and `file_access_error`. CLI failures retain the exit code and bounded stderr. Metadata files are limited to 1 MiB, and checked directory trees are limited to 20,000 entries.
 
@@ -60,5 +60,7 @@ python scripts/verify-mcp-stdio.py `
   --transcript .audit/mcp1/stdio.json
 dotnet test S4MT.sln
 ```
+
+After an upgrade, rebuild and restart the host, then reconnect the client or refresh its tools. The default stdout cap is 1 MiB. For large inspections, increase `maximumStdoutBytes` up to 16 MiB and restart. See [MCP tools](mcp-tools.md) for file staging and persistent output locks.
 
 The automated tests also use the official C# SDK stdio client. Clients must send the MCP `notifications/cancelled` message to cancel server work. Cancelling a local response wait alone does not prove server cancellation. The SDK can suppress the response after that notification, so verify child termination and the next successful request. No specific desktop client UI is claimed as verified.

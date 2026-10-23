@@ -38,6 +38,26 @@ namespace S4MT.Mcp
             return full;
         }
 
+        internal string Output(string path)
+        {
+            var full = Write(path);
+            foreach (var candidate in new[] { full, PathGuard.ResolvePath(full) })
+                foreach (var component in candidate.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+                    if (component.StartsWith(".s4mt-mcp", StringComparison.OrdinalIgnoreCase) ||
+                        component.StartsWith(".s4mt-stage-", StringComparison.OrdinalIgnoreCase))
+                        throw new McpFailure("reserved_output_path", "Tool outputs cannot target MCP locks, ownership markers, or staging paths.");
+            return full;
+        }
+
+        internal string StandaloneOutput(string path)
+        {
+            var full = Output(path);
+            for (var directory = PathGuard.ResolvePath(full); directory is not null; directory = Path.GetDirectoryName(directory))
+                if (File.Exists(Path.Combine(directory, ".s4mt-mcp.lock")) || File.Exists(Path.Combine(directory, ".s4mt-mcp-owner.json")))
+                    throw new McpFailure("output_in_project_build", "Standalone outputs cannot write inside a managed project build root.");
+            return full;
+        }
+
         internal IReadOnlyList<string> ProjectInputs(string project, bool initialize = false)
         {
             var inputs = new List<string>();
@@ -79,6 +99,35 @@ namespace S4MT.Mcp
             return inputs;
         }
 
+        internal IReadOnlyList<string> CommandInputs(string path, OptionRole role)
+        {
+            var inputs = new List<string> { Read(path) };
+            if (role == OptionRole.Project) return ProjectInputs(path);
+            if (role is OptionRole.Tree or OptionRole.Bundle)
+            {
+                CheckTree(path, write: false, inputs);
+                return inputs;
+            }
+            if (role is not (OptionRole.Manifest or OptionRole.MergeManifest)) return inputs;
+            var document = ReadObject(path);
+            if (document is null) return inputs;
+            var root = Path.GetDirectoryName(path)!;
+            if (role == OptionRole.Manifest && Property(document.Value, "resources") is { ValueKind: JsonValueKind.Array } resources)
+                foreach (var resource in resources.EnumerateArray())
+                    if (String(resource, "source") is { } source) Add(source);
+            if (role == OptionRole.MergeManifest && Property(document.Value, "packages") is { ValueKind: JsonValueKind.Array } packages)
+                foreach (var package in packages.EnumerateArray())
+                    if (package.ValueKind == JsonValueKind.String) Add(package.GetString()!);
+            return inputs;
+
+            void Add(string declaration)
+            {
+                var full = Path.IsPathFullyQualified(declaration) ? Path.GetFullPath(declaration) : Path.GetFullPath(Path.Combine(root, declaration));
+                inputs.Add(Read(full));
+                if (inputs.Count > MaximumFiles) throw new McpFailure("input_limit", "Manifest has too many sources.");
+            }
+        }
+
         internal void CheckTree(string root, bool write, List<string>? files = null)
         {
             var pending = new Stack<string>();
@@ -88,7 +137,8 @@ namespace S4MT.Mcp
             {
                 if (write && (Directory.Exists(path) || File.Exists(path)) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
                     throw new McpFailure("unsafe_project_path", "Build output trees cannot contain linked files or directories.");
-                Check(path, root, write);
+                if (write) Write(path);
+                else Check(path, root, write: false);
                 if (++count > MaximumFiles) throw new McpFailure("input_limit", "Directory exceeds the checked file limit.");
                 files?.Add(path);
                 if (Directory.Exists(path))
@@ -100,9 +150,10 @@ namespace S4MT.Mcp
         {
             foreach (var input in inputs.Append(options.CliPath))
             {
-                PathGuard.EnsureDoesNotOverwrite(outputRoot, (input, "input"));
-                if (Within(input, outputRoot))
-                    throw new McpFailure("path_collision", "Build output root must not contain a project input or the CLI.");
+                try { PathGuard.EnsureDoesNotOverwrite(outputRoot, (input, "input")); }
+                catch (CliInputException exception) { throw new McpFailure("path_collision", exception.Message); }
+                if (Within(input, outputRoot) || Directory.Exists(input) && Within(outputRoot, input))
+                    throw new McpFailure("path_collision", "Output must not contain an input or the CLI, or be inside an input tree.");
             }
         }
 
@@ -118,7 +169,7 @@ namespace S4MT.Mcp
         private void Check(string path, string root, bool write)
         {
             PathGuard.EnsureWithinDirectory(path, root, "Project path");
-            if (write) Write(path);
+            if (write) Output(path);
             if (!write || File.Exists(path) || Directory.Exists(path)) Read(path);
         }
 

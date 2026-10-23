@@ -38,7 +38,7 @@ internal static class PathGuard
         }
     }
 
-    private static string ResolvePath(string path)
+    internal static string ResolvePath(string path)
     {
         var fullPath = Path.GetFullPath(path);
         var root = Path.GetPathRoot(fullPath)

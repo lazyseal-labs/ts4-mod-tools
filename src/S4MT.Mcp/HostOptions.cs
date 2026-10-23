@@ -91,7 +91,7 @@ internal sealed record HostOptions
     {
         if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) || path.Contains('\0'))
             throw new McpFailure("invalid_arguments", "Paths must be explicit absolute paths.");
-        return Path.GetFullPath(path);
+        return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
     }
 
     private static bool IsPrivateNetworkAddress(Uri uri)
